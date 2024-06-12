@@ -8,7 +8,7 @@ using LinearAlgebra # for dot
 using NDTools
 using Noise # for poisson simulation
 using Images # for distance transform
-
+using BenchmarkTools
 
 mutable struct SIMParams
     psf_params::PSFParams
@@ -151,12 +151,37 @@ end
 
 Shifts the Fourier-transform of the image by subpixel values and returns the pixelshift.
 """
-function shift_subpixel!(img, ordershift, peakphase)
+function shift_subpixel!(img, ordershift)
     pixelshift = round.(Int, ordershift)
     subpixelshift = ordershift[1:2] .- pixelshift[1:2]
+    # if (norm(subpixelshift) == 0.0)
+    #     return pixelshift
+    # end
     pos = idx(eltype(img), size(img))
-    img .*= cis.(dot.(Ref(2pi .* subpixelshift ./ size(img)), pos) .+ peakphase)
+    img .*= cis.(dot.(Ref(2pi .* subpixelshift ./ size(img)), pos))
     return pixelshift
+end
+
+"""
+    dot_mul_last_dim!(orders, sim_data, myinv, n, Eps = 1e-7)
+
+performs the dot product of the last dimension of the SIM data with the inverse matrix of the weights.
+This is one part of the matrix multiplicaton for unmixing the orders.
+"""
+function dot_mul_last_dim!(orders, sim_data, myinv, n, Eps = 1e-7)
+    contributing = findall(x->abs(x) .> Eps, myinv[n,:])
+    sub_matrix = CT.(myinv[n, contributing])
+    mydstidx = ntuple(d->(d==ndims(sim_data)) ? (n:n) : Colon(), ndims(sim_data))
+    w = sub_matrix[1]
+    mymd = ntuple(d->(d==ndims(sim_data)) ? contributing[1] : Colon(), ndims(sim_data))
+    sv = @view sim_data[mymd...]
+    orders[mydstidx...] .= w.* (@view sim_data[mymd...])
+    for md in 2:length(contributing)
+        w = sub_matrix[md]
+        mymd = ntuple(d->(d==ndims(sim_data)) ? md : Colon(), ndims(sim_data))
+        sv = @view sim_data[mymd...]
+        orders[mydstidx...] .+= w.*sv
+    end
 end
 
 """
@@ -177,18 +202,32 @@ function separate_orders(sim_data, sp)
     orders = Array{CT}(undef, size(sim_data)[1:end-1]..., num_orders)
     pixelsshifts =  Array{NTuple{3, Int}}(undef, num_orders)
     for n=1:num_orders
-        contributing = findall(x->x!=0.0, myinv[n,:])
-        myidx = ntuple(d->(d==ndims(sim_data)) ? contributing : Colon(), ndims(sim_data))
-        sub_matrix = CT.(myinv[n, contributing])
-        sub_matrix = reorient(sub_matrix, Val(ndims(sim_data)))
-        sim_view = @view sim_data[myidx...] 
-        mydstidx = ntuple(d->(d==ndims(sim_data)) ? n : Colon(), ndims(sim_data))
-        orders[mydstidx...] .= sum(sim_view .* sub_matrix, dims=ndims(sim_data)) 
+        dot_mul_last_dim!(orders, sim_data, myinv, n);
+        # contributing = findall(x->x!=0.0, myinv[n,:])
+        # # myidx = ntuple(d->(d==ndims(sim_data)) ? contributing : Colon(), ndims(sim_data))
+        # sub_matrix = CT.(myinv[n, contributing])
+        # sub_matrix = reorient(sub_matrix, Val(ndims(sim_data)))
+        # # sim_view = @view sim_data[myidx...] 
+        # mydstidx = ntuple(d->(d==ndims(sim_data)) ? (n:n) : Colon(), ndims(sim_data))
+        # # sum!(orders[mydstidx...], sim_view .* sub_matrix) 
+        # for md in 1:size(sub_matrix, ndims(sim_data))
+        #     w = sub_matrix[md]
+        #     mymd = ntuple(d->(d==ndims(sim_data)) ? contributing[md] : Colon(), ndims(sim_data))
+        #     sv = @view sim_data[mymd...]
+        #     if (md==1)
+        #         orders[mydstidx...] .= w.* sv
+        #     else
+        #         orders[mydstidx...] .+= w.* sv
+        #     end
+        # end
+        #orders[mydstidx...] .= sum(sim_view .* sub_matrix, dims=ndims(sim_data)) 
 
         # apply subpixel shifts
         ordershift = .-sp.k_peak_pos[n] .* expand_size(size(sim_data)[1:end-1], ntuple((d)->1, length(sp.k_peak_pos[n]))) ./ 2
-        peakphase = 0.0 # should automatically have been accounted for # .-sp.peak_phases[n, contributing[1]] # not sure, if this is correct
-        pixelsshifts[n] = shift_subpixel!((@view orders[mydstidx...]), ordershift, peakphase)
+        # peakphase = 0.0 # should automatically have been accounted for # .-sp.peak_phases[n, contributing[1]] 
+        # peak phases are already accounted for in the weights
+        mydstidx = ntuple(d->(d==ndims(sim_data)) ? n : Colon(), ndims(sim_data))
+        pixelsshifts[n] = shift_subpixel!((@view orders[mydstidx...]), ordershift)
     end
     return orders, pixelsshifts
 end
@@ -306,8 +345,8 @@ function main()
     rp = ReconParams(0.01, 1.0, upsample_factor)
     prep = recon_sim_prepare(sim_data, pp, sp, rp)
 
-    # @profview  rec = recon_sim(sim_data, prep, rp)
-    @time rec = recon_sim(sim_data, prep, rp)
+    @profview  rec = recon_sim(sim_data, prep, rp)
+    @btime rec = recon_sim($sim_data, $prep, $rp);
 
     @vt sum(sim_data, dims=3)[:,:,1] rec obj
     @vt ft(real.(rec)) ft(sum(sim_data, dims=3)[:,:,1]) ft(obj)

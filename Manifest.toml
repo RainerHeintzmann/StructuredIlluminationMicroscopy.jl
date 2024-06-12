@@ -2,7 +2,7 @@
 
 julia_version = "1.10.4"
 manifest_format = "2.0"
-project_hash = "32025d9ac8eaf37fb99c1a4b45d1cd45db7bcd23"
+project_hash = "45de449503455c1edae06b0bf55ae534ec6329a8"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -122,6 +122,12 @@ deps = ["LinearAlgebra", "Memoize", "Random"]
 git-tree-sha1 = "3f7be532673fc4a22825e7884e9e0e876236b12a"
 uuid = "26cce99e-4866-4b6d-ab74-862489e035e0"
 version = "0.7.1"
+
+[[deps.BenchmarkTools]]
+deps = ["JSON", "Logging", "Printf", "Profile", "Statistics", "UUIDs"]
+git-tree-sha1 = "f1dff6729bc61f4d49e140da1af55dcd1ac97b2f"
+uuid = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+version = "1.5.0"
 
 [[deps.BitTwiddlingConvenienceFunctions]]
 deps = ["Static"]
@@ -601,6 +607,12 @@ git-tree-sha1 = "7e5d6779a1e09a36db2a7b6cff50942a0a7d0fca"
 uuid = "692b3bcd-3c85-4b1f-b108-f13ce0eb3210"
 version = "1.5.0"
 
+[[deps.JSON]]
+deps = ["Dates", "Mmap", "Parsers", "Unicode"]
+git-tree-sha1 = "31e996f0a15c7b280ba9f76636b3ff9e2ae58c9a"
+uuid = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
+version = "0.21.4"
+
 [[deps.JavaCall]]
 deps = ["DataStructures", "Dates", "Libdl", "WinReg"]
 git-tree-sha1 = "e24aed6633904563d13e3bc63b0498ba976c6453"
@@ -907,6 +919,12 @@ deps = ["OrderedCollections", "UnPack"]
 git-tree-sha1 = "34c0e9ad262e5f7fc75b10a9952ca7692cfc5fbe"
 uuid = "d96e819e-fc66-5662-9728-84c9c7592b0a"
 version = "0.12.3"
+
+[[deps.Parsers]]
+deps = ["Dates", "PrecompileTools", "UUIDs"]
+git-tree-sha1 = "8489905bcdbcfac64d1daa51ca07c0d8f0283821"
+uuid = "69de0a69-1ddd-5017-9359-2bf0b02dc9f0"
+version = "2.8.1"
 
 [[deps.Pkg]]
 deps = ["Artifacts", "Dates", "Downloads", "FileWatching", "LibGit2", "Libdl", "Logging", "Markdown", "Printf", "REPL", "Random", "SHA", "Serialization", "TOML", "Tar", "UUIDs", "p7zip_jll"]
