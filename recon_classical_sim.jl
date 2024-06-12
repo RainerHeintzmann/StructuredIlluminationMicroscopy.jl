@@ -1,11 +1,11 @@
 using View5D
-# using FFTW
-using FourierTools
+using FFTW
+# using FourierTools
 using IndexFunArrays # for rr and delta
 using PointSpreadFunctions # to calculate PSFs
 using TestImages
 using LinearAlgebra # for dot
-using NDTools
+using NDTools  # select_region!
 using Noise # for poisson simulation
 using Images # for distance transform
 using BenchmarkTools
@@ -125,10 +125,12 @@ function simulate_sim(obj, pp::PSFParams, sp::SIMParams)
     # sim_data = Array{eltype(obj)}(undef, size(h)..., size(sp.peak_phases, 1))
     sim_data = similar(obj, eltype(obj), size(h)..., size(sp.peak_phases, 1))
     # Generate SIM illumination pattern
+    otf = rfft(ifftshift(h))
     for n in 1:size(sp.peak_phases, 1)
         sim_pattern = SIMPattern(h, sp, n)
         myidx = ntuple(d->(d==ndims(sim_data)) ? n : Colon(), ndims(sim_data))
-        sim_data[myidx...] .= conv_psf(obj .* sim_pattern, h)
+        # sim_data[myidx...] .= conv_psf(obj .* sim_pattern, h)
+        sim_data[myidx...] .= irfft(rfft(obj .* sim_pattern) .*otf, size(h,1))
     end
 
     if (sp.n_photons != 0.0)
@@ -189,11 +191,24 @@ function dot_mul_last_dim!(order, sim_data, myinv, n, Eps = 1e-7)
     end
 end
 
-function get_upsampled_rft(sim_data, upsample_factor)
-    sz = size(sim_data)[1:end-1]
-    bsz = ceil.(Int, sz .* upsample_factor)
-    res = similar(sim_data, complex(eltype(sim_data)), rft_size(bsz)...)
-    res .= zero(complex(eltype(sim_data)))
+function rfft_size(sz)
+    return ntuple((d) -> (d==1) ? sz[d]÷ 2 + 1 : sz[d], length(sz))
+end
+
+function get_result_size(sz, upsample_factor)
+    return ceil.(Int, sz .* upsample_factor)
+end
+
+function get_upsampled_rft(sim_data, prep::NamedTuple)
+    if haskey(prep, :result_rft)
+        res = prep.result_rft
+        res .= zero(complex(eltype(sim_data)))
+    else
+        sz = size(sim_data)[1:end-1]
+        bsz = get_result_size(sz, prep.upsample_factor)
+        res = similar(sim_data, complex(eltype(sim_data)), rfft_size(bsz)...)
+        res .= zero(complex(eltype(sim_data)))
+    end
     return res # since this represents an rft
 end
 
@@ -256,18 +271,20 @@ Parameters:
 + `sp::SIMParams` : SIMParams object
 
 """
-function separate_and_place_orders(sim_data, sp, upsample_factor=2, otfmul=1.0)
+function separate_and_place_orders(sim_data, sp, prep)
     RT = eltype(sim_data)
     CT = Complex{RT}
     imsz = size(sim_data)[1:end-1]
 
+    otfmul = haskey(prep, :otf) ? prep.otf : one(RT)
+
     myinv = pinv_weight_matrix(sp)
     num_orders = size(sp.peak_phases, 2)
-    order = similar(sim_data, CT, imsz...)
-    ftorder = similar(sim_data, CT, imsz...)
+    order = haskey(prep,:order) ? prep.order : similar(sim_data, CT, imsz...)
+    ftorder = haskey(prep,:ftorder) ? prep.ftorder : similar(sim_data, CT, imsz...)
     sz = size(order)
-    bsz = ceil.(Int, sz .* upsample_factor) # backwards size
-    rec = get_upsampled_rft(sim_data, upsample_factor)
+    bsz = ceil.(Int, sz .* prep.upsample_factor) # backwards size
+    rec = get_upsampled_rft(sim_data, prep)
     # define the center coordinate of the rft result rec
     bctr = ntuple((d) -> (d==1) ? 1 : bsz[d] .÷ 2 .+ 1, length(bsz))
     # define a shifted center coordinate to account for the flip of even sizes, when appying a flip operation
@@ -302,18 +319,12 @@ function separate_and_place_orders(sim_data, sp, upsample_factor=2, otfmul=1.0)
         bwd_v = @view myftorder[idsbwd...]
         select_region!(bwd_v, rec; dst_center = bctrbwd .- ordershift[1:ndims(rec)], operator! = conj_add!)
 
-        # rec_view = select_region_view(rec, sz; center= bctr .+ ordershift[1:ndims(rec)])
-        # rec_view .+= myftorder # writes the FT of the order into the correct region of the final image FT
-
-        # rec_view = select_region_view(rec, sz; center= bctrbwd .- ordershift[1:ndims(rec)])
-        # idsbwd = ntuple(d-> (size(myftorder, d):-1:1), ndims(myftorder))
-        # rec_view .+= conj.(@view myftorder[idsbwd...]) # do the same for the conjugate order at the negative frequency
     end
     return rec, bsz
 end
 
 function conj_add!(dst, src)
-    dst .+= conj(src)
+    dst .+= conj.(src)
 end
 
 function add!(dst, src)
@@ -321,8 +332,8 @@ function add!(dst, src)
 end
 
 # the function below is not used any more, since it is now part of the separate_and_place_orders function
-function place_orders_upsample(orders, pixelshifts, upsample_factor=2, otfmul=1.0)
-    rec = get_upsampled_rft(sim_data, upsample_factor)
+function place_orders_upsample(orders, pixelshifts, prep)
+    rec = get_upsampled_rft(sim_data, prep)
 
     bctr = ntuple((d) -> (d==1) ? 1 : bsz[d] .÷ 2 .+ 1, length(bsz))
     bctrbwd = bctr .+ iseven.(bsz)  # to account for the flip of even sizes
@@ -351,17 +362,28 @@ function modify_otf(otf, sigma=0.1, contrast=1.0)
     return otf .* (one(RT) .- RT(contrast) .* exp.(-rr2(RT, size(otf), scale=ScaFT)/(2*sigma^2)))
 end
 
-function recon_sim_prepare(sim_data, pp::PSFParams, sp::SIMParams, rp::ReconParams)
+function recon_sim_prepare(sim_data, pp::PSFParams, sp::SIMParams, rp::ReconParams, do_preallocate=true)
     sz = size(sim_data)
+    imsz = sz[1:end-1]
     h = psf(sz[1:end-1], pp; sampling=sp.sampling)
     # rec = zeros(eltype(sim_data), size(sim_data)[1:end-1])
     RT = eltype(sim_data)
-    myotf = modify_otf(ft(h), RT(rp.suppression_sigma), RT(rp.otf_mul))
+    CT = Complex{RT}
+    myotf = modify_otf(fftshift(fft(ifftshift(h))), RT(rp.suppression_sigma), RT(rp.otf_mul))
     ids = ntuple(d->(d==ndims(sim_data)) ? 1 : Colon(), ndims(sim_data))
 
     ACT = typeof(sim_data[ids...] .+ 0im)
     myotf = ACT(myotf)
-    prepd = (otf= myotf,)
+    prepd = (otf= myotf, upsample_factor=rp.upsample_factor)
+    if (do_preallocate)
+        result_rft = get_upsampled_rft(sim_data, prepd)
+        result_rft_tmp = get_upsampled_rft(sim_data, prepd)
+        result =  similar(sim_data, RT, get_result_size(imsz, rp.upsample_factor)...)
+        result_tmp =  similar(sim_data, RT, get_result_size(imsz, rp.upsample_factor)...)
+        order =  similar(sim_data, CT, imsz...)
+        ftorder =  similar(sim_data, CT, imsz...)
+        prepd = (otf= myotf, upsample_factor=rp.upsample_factor, result_rft=result_rft, result_rft_tmp=result_rft_tmp, order=order, ftorder=ftorder, result=result, result_tmp=result_tmp)
+    end
 
     dobj = delta(eltype(sim_data), size(sim_data)[1:end-1])
     spd = SIMParams(sp, n_photons = 0.0);
@@ -380,8 +402,17 @@ function recon_sim_prepare(sim_data, pp::PSFParams, sp::SIMParams, rp::ReconPara
     final_filter = ACT(h_goal) .* conj.(rec_otf)./ (abs2.(rec_otf) .+ RT(rp.wiener_eps))
 
     final_filter = fftshift(rfft(real.(ifft(ifftshift(final_filter)))), [2,3])
-    # final_filter = collect(rft(real.(ift(final_filter))))
-    prep = (otf= myotf, final_filter=final_filter)
+
+    # the algorithm needs preallocated memory:
+    # order: Array{ACT}(undef, size(sim_data)[1:end-1]..., size(sp.peak_phases, 2))
+    # result_image: Array{ACT}(undef, size(sim_data)[1:end-1])
+    
+    if (do_preallocate)
+        prep = (otf= myotf, upsample_factor=rp.upsample_factor, final_filter=final_filter,  
+                result_rft=prepd.result_rft, order=prepd.order, ftorder=prepd.ftorder, result=prepd.result, result_tmp=prepd.result_tmp, result_rft_tmp=prepd.result_rft_tmp)
+    else
+        prep = (otf= myotf, final_filter=final_filter, upsample_factor=rp.upsample_factor)
+    end
     return prep
 end
 
@@ -411,7 +442,7 @@ function recon_sim(sim_data, prep, rp::ReconParams)
     # and perform Fourier-placement of the orders and upsampling and summation into final ft-image
     # res, bsz = place_orders_upsample(orders, pixelshifts, rp.upsample_factor, prep.otf)
 
-    res, bsz = separate_and_place_orders(sim_data, sp, rp.upsample_factor, prep.otf)
+    res, bsz = separate_and_place_orders(sim_data, sp, prep)
     # apply FFT
     # and perform Fourier-placement of the orders and upsampling and summation into final ft-image
     # res, bsz = place_orders_upsample(orders, pixelshifts, rp.upsample_factor, prep.otf)
@@ -422,7 +453,15 @@ function recon_sim(sim_data, prep, rp::ReconParams)
     end
 
     # apply IFT of the final ft-image
-    rec = fftshift(irfft(ifftshift(res, [2,3]), bsz[1]))
+
+    res_tmp = haskey(prep, :result_rft_tmp) ? prep.result_rft_tmp : similar(res);
+    rec = haskey(prep, :result) ? prep.result : similar(sim_data, eltype(sim_data), bsz...)
+    # rec_tmp = haskey(prep, :result_tmp) ? prep.result_tmp : similar(rec)
+
+    ifftshift!(res_tmp, res, [2,3])
+    rec_tmp = irfft(res_tmp,  bsz[1])
+    fftshift!(rec, rec_tmp)
+ #   rec = fftshift(irfft(ifftshift(res, [2,3]), bsz[1]))
     # rec = irft(res, bsz[1]) # real.(ift(res))
 
     # @vt real.(rec) sum(sim_data, dims=3)[:,:,1]
@@ -433,7 +472,7 @@ end
 
 function main()
 
-    use_cuda = true;
+    use_cuda = false;
 
     lambda = 0.532; NA = 1.4; n = 1.52
     pp = PSFParams(lambda, NA, n);  # 532 nm, NA 0.25 in Water n= 1.33
@@ -455,16 +494,16 @@ function main()
     end
 
     # @vv sim_data
-    upsample_factor = 2
+    upsample_factor = 1
     rp = ReconParams(0.01, 1.0, upsample_factor)
-    prep = recon_sim_prepare(sim_data, pp, sp, rp)
+    prep = recon_sim_prepare(sim_data, pp, sp, rp, true)
 
-    rec = recon_sim(sim_data, prep, rp);
+    @time rec = recon_sim(sim_data, prep, rp);
     # @profview  rec = recon_sim(sim_data, prep, rp)
     if use_cuda
         CUDA.@time rec = recon_sim(sim_data, prep, rp);
     else
-        @btime rec = recon_sim($sim_data, $prep, $rp);  # 40 ms (512), 55 ms (1024)
+        @btime rec = recon_sim($sim_data, $prep, $rp);  # 40 ms (512, 10Mb), 55 ms (1024)
     end
 
     @vt sum(sim_data, dims=3)[:,:,1] rec obj
