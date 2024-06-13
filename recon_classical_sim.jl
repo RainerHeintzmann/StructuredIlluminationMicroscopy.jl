@@ -308,7 +308,7 @@ function separate_and_place_orders(sim_data, sp, prep)
         # myftorder = ft(order)
         # myftorder .*= otfmul
         ifftshift!(ftorder, order)
-        fft!(ftorder)
+        prep.plan_fft!*ftorder # fft!
         fftshift!(order, ftorder) 
         order .*= otfmul
         myftorder = order # just an alias
@@ -374,15 +374,20 @@ function recon_sim_prepare(sim_data, pp::PSFParams, sp::SIMParams, rp::ReconPara
 
     ACT = typeof(sim_data[ids...] .+ 0im)
     myotf = ACT(myotf)
-    prepd = (otf= myotf, upsample_factor=rp.upsample_factor)
+    result_rft = get_upsampled_rft(sim_data, (upsample_factor=rp.upsample_factor,))
+    myplan_irfft = plan_irfft(result_rft, get_result_size(imsz, rp.upsample_factor)[1]) #, flags=FFTW.MEASURE
+    order =  similar(sim_data, CT, imsz...)
+    myplan_fft! = plan_fft!(order)  #, flags=FFTW.MEASURE
+
+    prepd = (otf= myotf, upsample_factor=rp.upsample_factor, plan_irfft=myplan_irfft, plan_fft! =myplan_fft!)
+
     if (do_preallocate)
-        result_rft = get_upsampled_rft(sim_data, prepd)
         result_rft_tmp = get_upsampled_rft(sim_data, prepd)
         result =  similar(sim_data, RT, get_result_size(imsz, rp.upsample_factor)...)
         result_tmp =  similar(sim_data, RT, get_result_size(imsz, rp.upsample_factor)...)
-        order =  similar(sim_data, CT, imsz...)
         ftorder =  similar(sim_data, CT, imsz...)
-        prepd = (otf= myotf, upsample_factor=rp.upsample_factor, result_rft=result_rft, result_rft_tmp=result_rft_tmp, order=order, ftorder=ftorder, result=result, result_tmp=result_tmp)
+        prepd = (otf= myotf, upsample_factor=rp.upsample_factor, plan_irfft=myplan_irfft, plan_fft! =myplan_fft!,
+                result_rft=result_rft, result_rft_tmp=result_rft_tmp, order=order, ftorder=ftorder, result=result, result_tmp=result_tmp)
     end
 
     dobj = delta(eltype(sim_data), size(sim_data)[1:end-1])
@@ -408,10 +413,10 @@ function recon_sim_prepare(sim_data, pp::PSFParams, sp::SIMParams, rp::ReconPara
     # result_image: Array{ACT}(undef, size(sim_data)[1:end-1])
     
     if (do_preallocate)
-        prep = (otf= myotf, upsample_factor=rp.upsample_factor, final_filter=final_filter,  
+        prep = (otf= myotf, upsample_factor=rp.upsample_factor, final_filter=final_filter, plan_irfft=myplan_irfft, plan_fft! =myplan_fft!,
                 result_rft=prepd.result_rft, order=prepd.order, ftorder=prepd.ftorder, result=prepd.result, result_tmp=prepd.result_tmp, result_rft_tmp=prepd.result_rft_tmp)
     else
-        prep = (otf= myotf, final_filter=final_filter, upsample_factor=rp.upsample_factor)
+        prep = (otf= myotf, final_filter=final_filter, upsample_factor=rp.upsample_factor, plan_irfft=myplan_irfft, plan_fft! =myplan_fft!)
     end
     return prep
 end
@@ -456,10 +461,14 @@ function recon_sim(sim_data, prep, rp::ReconParams)
 
     res_tmp = haskey(prep, :result_rft_tmp) ? prep.result_rft_tmp : similar(res);
     rec = haskey(prep, :result) ? prep.result : similar(sim_data, eltype(sim_data), bsz...)
-    # rec_tmp = haskey(prep, :result_tmp) ? prep.result_tmp : similar(rec)
+    rec_tmp = haskey(prep, :result_tmp) ? prep.result_tmp : similar(rec)
 
     ifftshift!(res_tmp, res, [2,3])
-    rec_tmp = irfft(res_tmp,  bsz[1])
+    if isnothing(prep.plan_irfft)
+        rec_tmp .= irfft(res_tmp,  bsz[1])
+    else
+        mul!(rec_tmp, prep.plan_irfft, res_tmp)
+    end
     fftshift!(rec, rec_tmp)
  #   rec = fftshift(irfft(ifftshift(res, [2,3]), bsz[1]))
     # rec = irft(res, bsz[1]) # real.(ift(res))
@@ -472,7 +481,7 @@ end
 
 function main()
 
-    use_cuda = false;
+    use_cuda = true;
 
     lambda = 0.532; NA = 1.4; n = 1.52
     pp = PSFParams(lambda, NA, n);  # 532 nm, NA 0.25 in Water n= 1.33
@@ -496,12 +505,13 @@ function main()
     # @vv sim_data
     upsample_factor = 1
     rp = ReconParams(0.01, 1.0, upsample_factor)
-    prep = recon_sim_prepare(sim_data, pp, sp, rp, true)
+    prep = recon_sim_prepare(sim_data, pp, sp, rp, true);
 
     @time rec = recon_sim(sim_data, prep, rp);
     # @profview  rec = recon_sim(sim_data, prep, rp)
     if use_cuda
-        CUDA.@time rec = recon_sim(sim_data, prep, rp);
+        # CUDA.@time rec = recon_sim(sim_data, prep, rp);
+        @btime CUDA.@sync rec = recon_sim(sim_data, prep, rp);
     else
         @btime rec = recon_sim($sim_data, $prep, $rp);  # 40 ms (512, 10Mb), 55 ms (1024)
     end
