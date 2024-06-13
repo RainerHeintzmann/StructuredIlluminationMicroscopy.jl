@@ -10,6 +10,7 @@ using Noise # for poisson simulation
 using Images # for distance transform
 using BenchmarkTools
 using CUDA
+using SeparableFunctions
 
 mutable struct SIMParams
     psf_params::PSFParams
@@ -155,15 +156,21 @@ end
 
 Shifts the Fourier-transform of the image by subpixel values and returns the pixelshift.
 """
-function shift_subpixel!(img, ordershift)
+function shift_subpixel!(img, ordershift, prep, order_num)
+    # pos = idx(eltype(img), size(img))
+    # img .*= cis.(dot.(Ref(2pi .* subpixelshift ./ size(img)), pos))
+    subpixel_shifters, pixelshift = (haskey(prep, :subpixelshifts)) ? (prep.subpixel_shifters[order_num], prep.pixelshift[order_num]) : get_shift_subpixel(img, ordershift)
+    img .*= subpixel_shifters
+    return pixelshift
+end
+
+function get_shift_subpixel(img, subpixelshift)
     pixelshift = round.(Int, ordershift)
     subpixelshift = ordershift[1:2] .- pixelshift[1:2]
     if (norm(subpixelshift) == 0.0)
         return pixelshift
     end
-    pos = idx(eltype(img), size(img))
-    img .*= cis.(dot.(Ref(2pi .* subpixelshift ./ size(img)), pos))
-    return pixelshift
+    return exp_ikx_sep(typeof(img), size(img); shift_by=.-subpixelshift), pixelshift
 end
 
 """
@@ -255,7 +262,7 @@ function separate_orders(sim_data, sp)
         # peakphase = 0.0 # should automatically have been accounted for # .-sp.peak_phases[n, contributing[1]] 
         # peak phases are already accounted for in the weights
         mydstidx = ntuple(d->(d==ndims(sim_data)) ? n : Colon(), ndims(sim_data))
-        pixelsshifts[n] = shift_subpixel!((@view orders[mydstidx...]), ordershift)
+        pixelsshifts[n] = shift_subpixel!((@view orders[mydstidx...]), ordershift, prep, n)
     end
     return orders, pixelsshifts
 end
@@ -290,7 +297,7 @@ function separate_and_place_orders(sim_data, sp, prep)
     # define a shifted center coordinate to account for the flip of even sizes, when appying a flip operation
     bctrbwd = bctr .+ iseven.(bsz)
 
-    pixelshifts =  Array{NTuple{3, Int}}(undef, num_orders)
+    # pixelshifts = Array{NTuple{3, Int}}(undef, num_orders)
     # if (otfmul <: AbstractArray)
     #     otfmul = ifftshift(otfmul)
     # end
@@ -300,8 +307,8 @@ function separate_and_place_orders(sim_data, sp, prep)
         # peakphase = 0.0 # should automatically have been accounted for # .-sp.peak_phases[n, contributing[1]] 
         # peak phases are already accounted for in the weights
         # mydstidx = ntuple(d->(d==ndims(sim_data)) ? n : Colon(), ndims(sim_data))
-        ordershift = shift_subpixel!(order, ordershift)
-        pixelshifts[n] = ordershift 
+        ordershift = shift_subpixel!(order, ordershift, prep, n)
+        # pixelshifts[n] = ordershift 
         dot_mul_last_dim!(order, sim_data, myinv, n); # writes into order
 
         # now place (add) the order with possible weights into the result RFFT image
@@ -318,7 +325,6 @@ function separate_and_place_orders(sim_data, sp, prep)
         idsbwd = ntuple(d-> (size(myftorder, d):-1:1), ndims(myftorder))
         bwd_v = @view myftorder[idsbwd...]
         select_region!(bwd_v, rec; dst_center = bctrbwd .- ordershift[1:ndims(rec)], operator! = conj_add!)
-
     end
     return rec, bsz
 end
@@ -481,7 +487,7 @@ end
 
 function main()
 
-    use_cuda = true;
+    use_cuda = false;
 
     lambda = 0.532; NA = 1.4; n = 1.52
     pp = PSFParams(lambda, NA, n);  # 532 nm, NA 0.25 in Water n= 1.33
