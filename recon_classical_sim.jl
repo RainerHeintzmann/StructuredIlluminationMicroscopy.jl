@@ -220,54 +220,6 @@ function get_upsampled_rft(sim_data, prep::NamedTuple)
 end
 
 """
-    separate_orders(sim_data, sp)
-
-Separate the orders in the SIM data and apply subpixel shifts. Returns the separated orders and the remaining integer pixelshifts.
-
-Parameters:
-+ `sim_data::Array` : simulated SIM data
-+ `sp::SIMParams` : SIMParams object
-
-"""
-function separate_orders(sim_data, sp)
-    myinv = pinv_weight_matrix(sp)
-    num_orders = size(sp.peak_phases, 2)
-    RT = eltype(sim_data)
-    CT = Complex{RT}
-    # orders = Array{CT}(undef, size(sim_data)[1:end-1]..., num_orders)
-    orders = similar(sim_data, CT, size(sim_data)[1:end-1]..., num_orders)
-    pixelsshifts =  Array{NTuple{3, Int}}(undef, num_orders)
-    for n=1:num_orders
-        contributing = findall(x->x!=0.0, myinv[n,:])
-        # myidx = ntuple(d->(d==ndims(sim_data)) ? contributing : Colon(), ndims(sim_data))
-        sub_matrix = CT.(myinv[n, contributing])
-        sub_matrix = reorient(sub_matrix, Val(ndims(sim_data)))
-        # sim_view = @view sim_data[myidx...] 
-        mydstidx = ntuple(d->(d==ndims(sim_data)) ? (n:n) : Colon(), ndims(sim_data))
-        # sum!(orders[mydstidx...], sim_view .* sub_matrix) 
-        for md in 1:size(sub_matrix, ndims(sim_data))
-            w = sub_matrix[md]
-            mymd = ntuple(d->(d==ndims(sim_data)) ? contributing[md] : Colon(), ndims(sim_data))
-            sv = @view sim_data[mymd...]
-            if (md==1)
-                orders[mydstidx...] .= w.* sv
-            else
-                orders[mydstidx...] .+= w.* sv
-            end
-        end
-        orders[mydstidx...] .= sum(sim_view .* sub_matrix, dims=ndims(sim_data)) 
-
-        # apply subpixel shifts
-        ordershift = .-sp.k_peak_pos[n] .* expand_size(size(sim_data)[1:end-1], ntuple((d)->1, length(sp.k_peak_pos[n]))) ./ 2
-        # peakphase = 0.0 # should automatically have been accounted for # .-sp.peak_phases[n, contributing[1]] 
-        # peak phases are already accounted for in the weights
-        mydstidx = ntuple(d->(d==ndims(sim_data)) ? n : Colon(), ndims(sim_data))
-        pixelsshifts[n] = shift_subpixel!((@view orders[mydstidx...]), ordershift, prep, n)
-    end
-    return orders, pixelsshifts
-end
-
-"""
     separate_and_place_orders(sim_data, sp)
 
 Separate the orders in the SIM data and apply subpixel shifts in real space. 
@@ -335,32 +287,6 @@ end
 
 function add!(dst, src)
     dst .+= src
-end
-
-# the function below is not used any more, since it is now part of the separate_and_place_orders function
-function place_orders_upsample(orders, pixelshifts, prep)
-    rec = get_upsampled_rft(sim_data, prep)
-
-    bctr = ntuple((d) -> (d==1) ? 1 : bsz[d] .÷ 2 .+ 1, length(bsz))
-    bctrbwd = bctr .+ iseven.(bsz)  # to account for the flip of even sizes
-    for n=1:size(orders, ndims(orders))
-        ordershift = pixelshifts[n]
-
-        ids = ntuple(d->(d==ndims(orders)) ? n : Colon(), ndims(orders))
-        myftorder = ft(@view orders[ids...])
-        myftorder .*= otfmul
-
-        select_region!(myftorder, rec; dst_center = bctr .+ ordershift[1:ndims(rec)], operator! = add!)
-        # rec_view = select_region_view(rec, sz; center= bctr .+ ordershift[1:ndims(rec)])
-        # rec_view .+= myftorder # writes the FT of the order into the correct region of the final image FT
-        idsbwd = ntuple(d-> (size(myftorder, d):-1:1), ndims(myftorder))
-        bwd_v = @view myftorder[idsbwd...]
-        select_region!(bwd_v, rec; dst_center = bctrbwd .- ordershift[1:ndims(rec)], operator! = conj_add!)
-        # rec_view = select_region_view(rec, sz; center= bctrbwd .- ordershift[1:ndims(rec)])
-        # idsbwd = ntuple(d-> (size(myftorder, d):-1:1), ndims(myftorder))
-        # rec_view .+= conj.(@view myftorder[idsbwd...]) # do the same for the conjugate order at the negative frequency
-    end
-    return rec, bsz
 end
 
 function modify_otf(otf, sigma=0.1, contrast=1.0)
