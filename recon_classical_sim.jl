@@ -159,16 +159,23 @@ Shifts the Fourier-transform of the image by subpixel values and returns the pix
 function shift_subpixel!(img, ordershift, prep, order_num)
     # pos = idx(eltype(img), size(img))
     # img .*= cis.(dot.(Ref(2pi .* subpixelshift ./ size(img)), pos))
-    subpixel_shifters, pixelshift = (haskey(prep, :subpixelshifts)) ? (prep.subpixel_shifters[order_num], prep.pixelshift[order_num]) : get_shift_subpixel(img, ordershift)
-    img .*= subpixel_shifters
+    subpixel_shifters, pixelshift = (haskey(prep, :subpixel_shifters)) ? (prep.subpixel_shifters[order_num], prep.pixelshifts[order_num]) : get_shift_subpixel(img, ordershift)
+    if (subpixel_shifters != 1)
+        img .*= subpixel_shifters
+    end
     return pixelshift
 end
 
-function get_shift_subpixel(img, subpixelshift)
+"""
+    get_shift_subpixel(img, ordershift)
+
+returns a separable function representation of a pixel-shifter to be multiplied with the FFT
+"""
+function get_shift_subpixel(img, ordershift)
     pixelshift = round.(Int, ordershift)
     subpixelshift = ordershift[1:2] .- pixelshift[1:2]
     if (norm(subpixelshift) == 0.0)
-        return pixelshift
+        return 1, pixelshift
     end
     return exp_ikx_sep(typeof(img), size(img); shift_by=.-subpixelshift), pixelshift
 end
@@ -249,7 +256,7 @@ function separate_and_place_orders(sim_data, sp, prep)
     # define a shifted center coordinate to account for the flip of even sizes, when appying a flip operation
     bctrbwd = bctr .+ iseven.(bsz)
 
-    # pixelshifts = Array{NTuple{3, Int}}(undef, num_orders)
+    pixelshifts = Array{NTuple{3, Int}}(undef, num_orders)
     # if (otfmul <: AbstractArray)
     #     otfmul = ifftshift(otfmul)
     # end
@@ -260,7 +267,7 @@ function separate_and_place_orders(sim_data, sp, prep)
         # peak phases are already accounted for in the weights
         # mydstidx = ntuple(d->(d==ndims(sim_data)) ? n : Colon(), ndims(sim_data))
         ordershift = shift_subpixel!(order, ordershift, prep, n)
-        # pixelshifts[n] = ordershift 
+        pixelshifts[n] = ordershift 
         dot_mul_last_dim!(order, sim_data, myinv, n); # writes into order
 
         # now place (add) the order with possible weights into the result RFFT image
@@ -311,7 +318,16 @@ function recon_sim_prepare(sim_data, pp::PSFParams, sp::SIMParams, rp::ReconPara
     order =  similar(sim_data, CT, imsz...)
     myplan_fft! = plan_fft!(order)  #, flags=FFTW.MEASURE
 
-    prepd = (otf= myotf, upsample_factor=rp.upsample_factor, plan_irfft=myplan_irfft, plan_fft! =myplan_fft!)
+    num_orders = size(sp.peak_phases,2)
+    pixelshifts = Array{NTuple{3, Int}}(undef, num_orders)
+    subpixel_shifters = Vector{Any}(undef, num_orders)
+    for n in 1:num_orders
+        ordershift = .-sp.k_peak_pos[n] .* expand_size(imsz, ntuple((d)->1, length(sp.k_peak_pos[n]))) ./ 2
+        # ordershift = shift_subpixel!(order, ordershift, prep, n)
+        subpixel_shifters[n], pixelshifts[n] = get_shift_subpixel(order, ordershift)
+    end
+
+    prepd = (otf= myotf, upsample_factor=rp.upsample_factor, plan_irfft=myplan_irfft, plan_fft! =myplan_fft!, subpixel_shifters=subpixel_shifters, pixelshifts=pixelshifts)
 
     if (do_preallocate)
         result_rft_tmp = get_upsampled_rft(sim_data, prepd)
@@ -346,9 +362,12 @@ function recon_sim_prepare(sim_data, pp::PSFParams, sp::SIMParams, rp::ReconPara
     
     if (do_preallocate)
         prep = (otf= myotf, upsample_factor=rp.upsample_factor, final_filter=final_filter, plan_irfft=myplan_irfft, plan_fft! =myplan_fft!,
+            subpixel_shifters=subpixel_shifters, pixelshifts=pixelshifts,
                 result_rft=prepd.result_rft, order=prepd.order, ftorder=prepd.ftorder, result=prepd.result, result_tmp=prepd.result_tmp, result_rft_tmp=prepd.result_rft_tmp)
     else
-        prep = (otf= myotf, final_filter=final_filter, upsample_factor=rp.upsample_factor, plan_irfft=myplan_irfft, plan_fft! =myplan_fft!)
+        prep = (otf= myotf, final_filter=final_filter, 
+        subpixel_shifters=subpixel_shifters, pixelshifts=pixelshifts,
+        upsample_factor=rp.upsample_factor, plan_irfft=myplan_irfft, plan_fft! =myplan_fft!)
     end
     return prep
 end
@@ -413,15 +432,15 @@ end
 
 function main()
 
-    use_cuda = false;
+    use_cuda = true;
 
     lambda = 0.532; NA = 1.4; n = 1.52
     pp = PSFParams(lambda, NA, n);  # 532 nm, NA 0.25 in Water n= 1.33
     sampling = (0.06, 0.06, 0.1)  # 100 nm x 100 nm x 200 nm
 
     # SIM illumination pattern
-    num_phases = 9
-    num_directions = 3
+    num_phases = 7*5
+    num_directions = 5
     k_peak_pos, peak_phases, peak_strengths = generate_peaks(num_phases, num_directions, 2, 0.48)
     # sp = SIMParams(pp, sampling, 0.0, 0.0, k_peak_pos, peak_phases, peak_strengths)
     sp = SIMParams(pp, sampling, 1000.0, 100.0, k_peak_pos, peak_phases, peak_strengths)
@@ -435,7 +454,7 @@ function main()
     end
 
     # @vv sim_data
-    upsample_factor = 1
+    upsample_factor = 3
     rp = ReconParams(0.01, 1.0, upsample_factor)
     prep = recon_sim_prepare(sim_data, pp, sp, rp, true);
 
