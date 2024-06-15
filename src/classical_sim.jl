@@ -212,7 +212,7 @@ function recon_sim_prepare(sim_data, pp::PSFParams, sp::SIMParams, rp::ReconPara
         result_tmp =  similar(sim_data, RT, get_result_size(imsz, rp.upsample_factor)...)
         ftorder =  similar(sim_data, CT, imsz...)
         prepd = (otf= myotf, upsample_factor=rp.upsample_factor, plan_irfft=myplan_irfft, plan_fft! =myplan_fft!,
-                result_rft=result_rft, result_rft_tmp=result_rft_tmp, order=order, ftorder=ftorder, result=result) #, result_tmp=result_tmp
+                result_rft=result_rft, result_rft_tmp=result_rft_tmp, order=order, ftorder=ftorder, result=result, result_tmp=result_tmp) #
     end
 
     dobj = delta(eltype(sim_data), size(sim_data)[1:end-1])  # , offset=CtrFFT)

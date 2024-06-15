@@ -6,7 +6,7 @@ using CUDA
 
 function main()
 
-    use_cuda = false;
+    use_cuda = true;
 
     lambda = 0.532; NA = 1.2; n = 1.52
     pp = PSFParams(lambda, NA, n);  # 532 nm, NA 0.25 in Water n= 1.33
@@ -41,7 +41,8 @@ function main()
     wiener_eps = 0.00001
     suppression_strength = 0.99
     rp = ReconParams(wiener_eps, suppression_strength, upsample_factor)
-    prep = recon_sim_prepare(sim_data, pp, sp, rp, false);
+    do_preallocate = true
+    prep = recon_sim_prepare(sim_data, pp, sp, rp, do_preallocate); # do preallocate
 
     @time recon = recon_sim(sim_data, prep, sp, rp);
     @vt recon
@@ -54,8 +55,8 @@ function main()
         # 512x512 raw data, upsampling 3x, 5 phase/direction, 5 directions, 5 order total, 6ms
     else
         @btime recon = recon_sim($sim_data, $prep, $sp, $rp);  # 22 ms (512x512), 18 ms (one zero order, 512x512), 25 ms (one zero order, 1024x1024)
-        # upsample 3, 7 phase/direction, 7 order total, 106 ms
-        # upsample 3, 5 phase/direction, 5 directions, 5 order total, 76ms
+        # upsample 3, 7 phase/direction, 7 order total, 86 ms
+        # upsample 3, 5 phase/direction, 5 directions, 5 order total, 71ms
     end
 
     @vt ft(real.(recon)) ft(sum(sim_data, dims=3)[:,:,1]) ft(obj)
