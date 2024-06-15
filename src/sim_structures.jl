@@ -24,12 +24,12 @@ end
 
 mutable struct ReconParams
     suppression_sigma::Float64
-    otf_mul::Float64
+    suppression_strength::Float64
     upsample_factor::Int
     wiener_eps::Float64
 
-    function ReconParams(suppression_sigma::Float64 = 0.2, otf_mul::Float64 = 1.0, upsample_factor::Int = 2, wiener_eps::Float64 = 1e-6)    
-        new(suppression_sigma, otf_mul, upsample_factor, wiener_eps)
+    function ReconParams(suppression_sigma::Float64 = 0.2, suppression_strength::Float64 = 1.0, upsample_factor::Int = 2, wiener_eps::Float64 = 1e-6)    
+        new(suppression_sigma, suppression_strength, upsample_factor, wiener_eps)
     end
 end
 
@@ -38,13 +38,13 @@ end
 
 Generate the SIM illumination pattern.
 Parameters:
-+ `h::PSF` : PSF object
++ `h::PSF` : PSF object, needed only to determine the datatype.
 + sp::SIMParams : SIMParams object
 
 """
 function SIMPattern(h, sp::SIMParams, n)
     sim_pattern = zeros(eltype(h), size(h))
-    pos = idx(eltype(h), size(h))
+    pos = idx(eltype(h), size(h)) # , offset=CtrFFT)
     for i in 1:size(sp.k_peak_pos, 1)
         k = pi.*sp.k_peak_pos[i][1:ndims(h)] # sp.k_peak_pos is relative to the Nyquist frequency of the image
         if (sp.peak_strengths[n,i] != 0.0)
@@ -74,7 +74,6 @@ function generate_peaks(num_phases::Int=9, num_directions::Int=3, num_orders::In
         num_peaks -= num_directions - 1 
     end
     k_peak_pos = Array{NTuple{3, Float64}}(undef, num_peaks)
-    @show num_peaks
     current_peak = 1
     for d in 0:num_directions-1 # starts at zero
         for o in 0:num_orders-1 # starts at zero

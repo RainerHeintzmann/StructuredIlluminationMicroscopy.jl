@@ -24,6 +24,21 @@ function shift_subpixel!(img, ordershift, prep, order_num)
     return pixelshift
 end
 
+function fftshift_sep!(myseparable)
+    for d in 1:length(myseparable.args)
+        myseparable.args[d].parent .= fftshift(myseparable.args[d].parent)
+    end
+    return myseparable
+end
+
+function ifftshift_sep!(myseparable)
+    for d in 1:length(myseparable.args)
+        myseparable.args[d].parent .= ifftshift(myseparable.args[d].parent)
+    end
+    # myseparable.args = ntuple((i) -> fftshift(myseparable.args[i]), length(myseparable.args))
+    return myseparable
+end
+
 """
     get_shift_subpixel(img, ordershift)
 
@@ -35,7 +50,10 @@ function get_shift_subpixel(img, ordershift)
     if (norm(subpixelshift) == 0.0)
         return 1, pixelshift
     end
-    return exp_ikx_sep(typeof(img), size(img); shift_by=.-subpixelshift), pixelshift
+
+    mysepshift = exp_ikx_sep(typeof(img), size(img); shift_by= .-subpixelshift) # should be negative to agree with integer pixel shifts
+    # ifftshift_sep!(mysepshift) # due to the shifing being in the iFFT space and not the FFT space
+    return mysepshift, pixelshift
 end
 
 """
@@ -108,7 +126,7 @@ function separate_and_place_orders(sim_data, sp::SIMParams, prep)
     ftorder = haskey(prep,:ftorder) ? prep.ftorder : similar(sim_data, CT, imsz...)
     sz = size(order)
     bsz = ceil.(Int, sz .* prep.upsample_factor) # backwards size
-    rec = get_upsampled_rft(sim_data, prep)
+    rec = get_upsampled_rft(sim_data, prep) # gets the memory and clears the result array
     # define the center coordinate of the rft result rec
     bctr = ntuple((d) -> (d==1) ? 1 : bsz[d] .÷ 2 .+ 1, length(bsz))
     # define a shifted center coordinate to account for the flip of even sizes, when appying a flip operation
@@ -124,14 +142,15 @@ function separate_and_place_orders(sim_data, sp::SIMParams, prep)
         # peakphase = 0.0 # should automatically have been accounted for # .-sp.peak_phases[n, contributing[1]] 
         # peak phases are already accounted for in the weights
         # mydstidx = ntuple(d->(d==ndims(sim_data)) ? n : Colon(), ndims(sim_data))
+        dot_mul_last_dim!(order, sim_data, myinv, n); # unmixes (separates) an order from the data, writes into order
         ordershift = shift_subpixel!(order, ordershift, prep, n)
         pixelshifts[n] = ordershift 
-        dot_mul_last_dim!(order, sim_data, myinv, n); # writes into order
 
         # now place (add) the order with possible weights into the result RFFT image
         # myftorder = ft(order)
         # myftorder .*= otfmul
         ifftshift!(ftorder, order)
+        # ftorder .= order
         prep.plan_fft!*ftorder # fft!
         fftshift!(order, ftorder) 
         order .*= otfmul
@@ -166,7 +185,7 @@ function recon_sim_prepare(sim_data, pp::PSFParams, sp::SIMParams, rp::ReconPara
     # rec = zeros(eltype(sim_data), size(sim_data)[1:end-1])
     RT = eltype(sim_data)
     CT = Complex{RT}
-    myotf = modify_otf(fftshift(fft(ifftshift(h))), RT(rp.suppression_sigma), RT(rp.otf_mul))
+    myotf = modify_otf(fftshift(fft(ifftshift(h))), RT(rp.suppression_sigma), RT(rp.suppression_strength))
     ids = ntuple(d->(d==ndims(sim_data)) ? 1 : Colon(), ndims(sim_data))
 
     ACT = typeof(sim_data[ids...] .+ 0im)
@@ -193,10 +212,10 @@ function recon_sim_prepare(sim_data, pp::PSFParams, sp::SIMParams, rp::ReconPara
         result_tmp =  similar(sim_data, RT, get_result_size(imsz, rp.upsample_factor)...)
         ftorder =  similar(sim_data, CT, imsz...)
         prepd = (otf= myotf, upsample_factor=rp.upsample_factor, plan_irfft=myplan_irfft, plan_fft! =myplan_fft!,
-                result_rft=result_rft, result_rft_tmp=result_rft_tmp, order=order, ftorder=ftorder, result=result, result_tmp=result_tmp)
+                result_rft=result_rft, result_rft_tmp=result_rft_tmp, order=order, ftorder=ftorder, result=result) #, result_tmp=result_tmp
     end
 
-    dobj = delta(eltype(sim_data), size(sim_data)[1:end-1])
+    dobj = delta(eltype(sim_data), size(sim_data)[1:end-1])  # , offset=CtrFFT)
     spd = SIMParams(sp, n_photons = 0.0);
     sim_delta = simulate_sim(dobj, pp, spd);
     ART = typeof(sim_data)
@@ -205,14 +224,15 @@ function recon_sim_prepare(sim_data, pp::PSFParams, sp::SIMParams, rp::ReconPara
 
     # calculate the final filter
     # rec_otf = ft(rec_delta)
-    rec_otf = fftshift(fft(ifftshift(rec_delta)))
+    # rec_otf = fftshift(fft(ifftshift(rec_delta)))
+    rec_otf = fftshift(fft(rec_delta))
     rec_otf ./= maximum(abs.(rec_otf))
     h_goal = RT.(distance_transform(feature_transform(Array(abs.(rec_otf) .< 0.0002))))
     h_goal ./= maximum(abs.(h_goal))
 
     final_filter = ACT(h_goal) .* conj.(rec_otf)./ (abs2.(rec_otf) .+ RT(rp.wiener_eps))
-
-    final_filter = fftshift(rfft(real.(ifft(ifftshift(final_filter)))), [2,3])
+    #final_filter = fftshift(rfft(real.(ifft(ifftshift(final_filter)))), [2,3])
+    final_filter = fftshift(rfft(fftshift(real.(ifft(ifftshift(final_filter))))), [2,3])
 
     # the algorithm needs preallocated memory:
     # order: Array{ACT}(undef, size(sim_data)[1:end-1]..., size(sp.peak_phases, 2))
@@ -221,7 +241,7 @@ function recon_sim_prepare(sim_data, pp::PSFParams, sp::SIMParams, rp::ReconPara
     if (do_preallocate)
         prep = (otf= myotf, upsample_factor=rp.upsample_factor, final_filter=final_filter, plan_irfft=myplan_irfft, plan_fft! =myplan_fft!,
             subpixel_shifters=subpixel_shifters, pixelshifts=pixelshifts,
-                result_rft=prepd.result_rft, order=prepd.order, ftorder=prepd.ftorder, result=prepd.result, result_tmp=prepd.result_tmp, result_rft_tmp=prepd.result_rft_tmp)
+                result_rft=prepd.result_rft, order=prepd.order, ftorder=prepd.ftorder, result=prepd.result, result_tmp=prepd.result_tmp, result_rft_tmp=prepd.result_rft_tmp) #
     else
         prep = (otf= myotf, final_filter=final_filter, 
         subpixel_shifters=subpixel_shifters, pixelshifts=pixelshifts,
@@ -257,10 +277,9 @@ function recon_sim(sim_data, prep, sp::SIMParams, rp::ReconParams)
     # and perform Fourier-placement of the orders and upsampling and summation into final ft-image
     # res, bsz = place_orders_upsample(orders, pixelshifts, rp.upsample_factor, prep.otf)
 
-    res, bsz = separate_and_place_orders(sim_data, sp, prep)
     # apply FFT
     # and perform Fourier-placement of the orders and upsampling and summation into final ft-image
-    # res, bsz = place_orders_upsample(orders, pixelshifts, rp.upsample_factor, prep.otf)
+    res, bsz = separate_and_place_orders(sim_data, sp, prep)
     
     # apply final frequency-dependent multiplication (filtering)
     if (haskey(prep, :final_filter))
@@ -277,15 +296,16 @@ function recon_sim(sim_data, prep, sp::SIMParams, rp::ReconParams)
     if isnothing(prep.plan_irfft)
         rec_tmp .= irfft(res_tmp,  bsz[1])
     else
-        mul!(rec_tmp, prep.plan_irfft, res_tmp)
+        mul!(rec_tmp, prep.plan_irfft, res_tmp)
     end
-    fftshift!(rec, rec_tmp)
- #   rec = fftshift(irfft(ifftshift(res, [2,3]), bsz[1]))
+    # rec .= rec_tmp
+    # fftshift!(rec, rec_tmp)
+    # rec = fftshift(irfft(ifftshift(res, [2,3]), bsz[1]))
     # rec = irft(res, bsz[1]) # real.(ift(res))
 
     # @vt real.(rec) sum(sim_data, dims=3)[:,:,1]
     # @vt ft(real.(rec)) ft(sum(sim_data, dims=3)[:,:,1]) ft(obj)
 
-    return rec
+    return rec_tmp
 end
 
