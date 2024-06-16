@@ -1,4 +1,5 @@
-"""
+# StructuredIlluminationMicroscopy
+
 Structured Illumination Microscopy (SIM) is a super-resolution technique that uses a patterned illumination
 to increase the resolution of the microscope. This package provides tools to simulate and reconstruct SIM data.
 
@@ -9,7 +10,7 @@ The package provides the following functionality:
 
 The package is designed to be flexible and can be used with different PSFs and illumination patterns.
 
-# Example
+## Example
 ```julia
 using StructuredIlluminationMicroscopy
 using TestImages
@@ -36,20 +37,20 @@ prep = recon_sim_prepare(sim_data, pp, sp, rp, do_preallocate); # do preallocate
 recon = recon_sim(sim_data, prep, sp, rp);
 ```
 
-# References
+## References
 1. Heintzmann, R., & Cremer, C. (1999). Laterally modulated excitation microscopy: improvement of resolution by using a diffraction grating. In Proceedings of SPIE - The International Society for Optical Engineering (Vol. 3568, pp. 185–196). https://doi.org/10.1117/12.336826
 2. Gustafsson, M. G. L. (2000). Surpassing the lateral resolution limit by a factor of two using structured illumination microscopy. Journal of Microscopy, 198(2), 82–87. https://doi.org/10.1046/j.1365-2818.2000.00710.x
 3. Heintzmann, R., Jovin, T. M., & Cremer, C. (2002). Saturated patterned excitation microscopy—a concept for optical resolution improvement. Journal of the Optical Society of America A, 19(8), 1599. https://doi.org/10.1364/JOSAA.19.001599
 4. Gustafsson, M. G. L., Shao, L., Carlton, P. M., Wang, C. J. R., Golubovskaya, I. N., Cande, W. Z., … Sedat, J. W. (2008). Three-dimensional resolution doubling in wide-field fluorescence microscopy by structured illumination. Biophysical Journal, 94(12), 4957–4970. https://doi.org/10.1529/biophysj.107.120345
 5. Heintzmann, R., & Gustafsson, M. G. L. (2009). Subdiffraction resolution in continuous samples. Nature Photonics, 3(7), 362–364. https://doi.org/10.1038/nphoton.2009.96
 
-# Installation
+## Installation
 ```julia
 using Pkg
 Pkg.add("StructuredIlluminationMicroscopy")
 ```
 
-# Author
+## Author(s)
 - Rainer Heintzmann (
     Friedrich-Schiller-Universität Jena, Institut für Angewandte Physik, Jena, Germany
     Leibniz-Institut für Photonische Technologien e.V., Jena, Germany
@@ -58,32 +59,8 @@ Pkg.add("StructuredIlluminationMicroscopy")
 # ToDo
 - [ ] Add example for two-dimensional excitation patterns
 - [ ] Add code for parameter estimation
+- [ ] Add proper 3D support (one linked OTF per order)
 - [ ] Add support for automatic differentiation
 - [ ] Add spatial (Labouesse Masterthesis DOI:10.13140/RG.2.2.25191.66727) reconstruction mode
 - [ ] Add more examples
 - [ ] Add more tests
-
-"""
-module StructuredIlluminationMicroscopy
-
-    using FFTW
-    using IndexFunArrays # for rr and delta
-    using PointSpreadFunctions # to calculate PSFs
-    using LinearAlgebra # for dot
-    using NDTools  # select_region!
-    using Noise # for poisson simulation
-    using Images # for distance transform
-    using SeparableFunctions
-
-    export PSFParams, SIMParams, ReconParams
-    export generate_peaks, simulate_sim, recon_sim_prepare, recon_sim
-    export separate_and_place_orders, modify_otf, SIMPattern, get_upsampled_rft, get_result_size, ifftshift_sep!, fftshift_sep!
-    export get_shift_subpixel, pinv_weight_matrix, shift_subpixel!, shift_subpixel, shift_subpixel_fft, dot_mul_last_dim!, add!, conj_add!
-    export rfft_crop, rfft_size, rfftshift, rifftshift, rfftshift!, rifftshift!
-
-    include("sim_structures.jl")
-    include("utils.jl")
-    include("simulate_sim.jl")
-    include("classical_sim.jl")
-
-end

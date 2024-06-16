@@ -1,6 +1,7 @@
 [deps]
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+FourierTools = "b18b359b-aebc-45ac-a139-9c0ccbb2871e"
 NDTools = "98581153-e998-4eef-8d0d-5ec2c052313d"
 StructuredIlluminationMicroscopy = "a7ea9a99-8dd4-4c38-9d41-c34fb0fe62c4"
 TestImages = "5e47fb64-e119-507b-a336-dd2b206d9990"
