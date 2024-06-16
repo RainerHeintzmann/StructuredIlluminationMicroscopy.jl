@@ -8,7 +8,11 @@ The package provides the following functionality:
 2. Simulate SIM data
 3. Reconstruct SIM data
 
-The package is designed to be flexible and can be used with different PSFs and illumination patterns.
+The package is designed to be flexible and can be used with different PSFs and illumination patterns (series of grating directions as well as two-dimensional excitation patterns). It is fairly optimized for speed and low memory requirements (a few more optimization such as sharing memory between arrays that are sequentially needed during reconstruction can still be done). 
+
+It does not yet support three-dimensional reconstructions, and is does not yet have any parameter estimation routines included.
+Therefor it is not ready for use on experimentally acquired data.
+
 
 ## Example
 ```julia
@@ -59,6 +63,7 @@ Pkg.add("StructuredIlluminationMicroscopy")
 # ToDo
 - [ ] Add example for two-dimensional excitation patterns
 - [ ] Add code for parameter estimation
+- [ ] sharing memory between pre-allocated arrays result_rft and [result, order, ftorder]
 - [ ] Add proper 3D support (one linked OTF per order)
 - [ ] Add support for automatic differentiation
 - [ ] Add spatial (Labouesse Masterthesis DOI:10.13140/RG.2.2.25191.66727) reconstruction mode
