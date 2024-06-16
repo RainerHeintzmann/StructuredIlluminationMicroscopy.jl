@@ -13,6 +13,21 @@ The package is designed to be flexible and can be used with different PSFs and i
 It does not yet support three-dimensional reconstructions, and is does not yet have any parameter estimation routines included.
 Therefor it is not ready for use on experimentally acquired data.
 
+## Speed
+
+On a Laptop (11th generation Intel(R) Core(TM) i7 1180H @2.3 GHz) CPU:
+512x512 raw data (1536x1536 result size), upsample 3, 5 phase/direction, 5 directions, 5 (both sides) orders total: 
+44ms per reconstruction
+
+On the Laptop GPU (TX3050Ti):
+512x512 raw data (1536x1536 result size), upsampling 3x, 5 phase/direction, 5 directions, 5 (both sides) order total: 
+6 ms per reconstruction
+
+## Current Memory Requirements
+
+42 Mb (mostly preallocated) for the same configuration
+
+
 
 ## Example
 ```julia
