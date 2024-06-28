@@ -98,7 +98,7 @@ function shift_subpixel!(img, ordershift, prep, order_num)
     if (subpixel_shifters != 1)
         img .*= subpixel_shifters
     end
-    return pixelshift
+    return (pixelshift[1:2]..., 0)
 end
 
 """
@@ -147,7 +147,7 @@ function get_shift_subpixel(img, ordershift)
         return 1, pixelshift
     end
 
-    mysepshift = exp_ikx_sep(typeof(img), size(img); shift_by= .-subpixelshift) # should be negative to agree with integer pixel shifts
+    mysepshift = exp_ikx_sep(typeof(img), size(img)[1:2]; shift_by= .-subpixelshift) # should be negative to agree with integer pixel shifts
     # ifftshift_sep!(mysepshift) # due to the shifing being in the iFFT space and not the FFT space
     return mysepshift, pixelshift
 end
@@ -189,6 +189,7 @@ Parameters:
 
 """
 function get_result_size(sz, upsample_factor)
+    upsample_factor = ntuple((d) -> (d<=2) ? upsample_factor : 1, length(sz))
     return ceil.(Int, sz .* upsample_factor)
 end
 
@@ -233,5 +234,59 @@ Parameters:
 """
 function modify_otf(otf, sigma=0.1, contrast=1.0)
     RT = real(eltype(otf))
-    return otf .* (one(RT) .- RT(contrast) .* exp.(-rr2(RT, size(otf), scale=ScaFT)/(2*sigma^2)))
+    return otf .* (one(RT) .- RT(contrast) .* exp.(-rr2(RT, size(otf)[1:2], scale=ScaFT)/(2*sigma^2)))
+end
+
+"""
+    swap_vals!(v1, v2)
+
+swap the values of the views `v1` and `v2` in place without requiring memory.
+
+Parameters:
++ `v1` : view 1
++ `v2` : view 2
+
+"""
+function swap_vals!(v1, v2)
+    v1 .⊻= v2  # swap memory-free via three .xor operations
+    v2 .⊻= v1
+    v1 .⊻= v2 
+end
+
+IntType(::Type{Float16}) = Int16
+IntType(::Type{Float32}) = Int32
+IntType(::Type{ComplexF32}) = Int64
+IntType(::Type{Float64}) = Int64
+IntType(::Type{ComplexF64}) = Int128
+IntType(::Type{Int16}) = Int16
+IntType(::Type{Int32}) = Int32
+IntType(::Type{Int64}) = Int64
+IntType(::Type{Int128}) = Int128
+
+"""
+    fftshift!(dst, dims)
+
+shift the FFT of `dst` in place. The dimensions to be shifted are specified by `dims`.
+The sizes of the dimensions specified by `dims` must be even. The in-place shifted array is also returned.
+
+Parameters:
++ `dst` : destination array
++ `dims` : dimensions to be shifted
+"""
+function fftshift_even!(dst, dims=1:ndims(dst))
+    if any(isodd.(size(dst)[dims]))
+        error("all dst sizes $(size(dst)) specified by dims $(dims) must be even, for this algorithm to work correctly")
+    end
+    dstr = reinterpret(IntType(eltype(dst)), dst)
+    off = zeros(Int, ndims(dst))
+    for perm in 1:2^(length(dims)-1)
+        hilo = ntuple((d) -> (perm & (1 << (d-1))) != 0, length(dims)-1)
+        for d in 1:length(dims)-1
+            off[dims[d]] = hilo[d]*(size(dst)[dims[d]]÷2)
+        end
+        first_half = ntuple((d) -> (d in dims) ? (1+off[d]:size(dst)[d]÷2+off[d]) : Colon(), ndims(dst))
+        second_half = ntuple((d) -> (d in dims) ? (size(dst)[d]÷2+1-off[d]:size(dst,d)-off[d]) : Colon(), ndims(dst))
+        swap_vals!(view(dstr, first_half...), view(dstr, second_half...))
+    end
+    return dst
 end

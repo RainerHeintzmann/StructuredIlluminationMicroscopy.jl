@@ -38,21 +38,22 @@ function main()
     upsample_factor = downsample_factor
     wiener_eps = 0.00001
     suppression_strength = 0.99
-    rp = ReconParams(wiener_eps, suppression_strength, upsample_factor)
+    suppression_sigma = 1e-3
+    rp = ReconParams(suppression_sigma, suppression_strength, upsample_factor, wiener_eps)
     do_preallocate = false; use_measure = !use_cuda
     prep = recon_sim_prepare(sim_data, pp, sp, rp, do_preallocate; use_measure=use_measure); # do preallocate
 
-    @time recon = recon_sim(sim_data, prep, sp, rp);
+    @time recon = recon_sim(sim_data, prep, sp);
     wf = (use_cuda) ? sum(sim_data, dims=3)[:,:,1] : resample(sum(sim_data, dims=3)[:,:,1], size(recon))
     # @vt recon
     @vt wf recon obj
 
     if use_cuda
-        @btime CUDA.@sync recon = recon_sim(sim_data, prep, sp, rp);  
+        @btime CUDA.@sync recon = recon_sim(sim_data, prep, sp);  
         # 512x512 raw data, upsampling 3x, 7 phase/direction, 5 directions, 7 order total, 9ms
         # 512x512 raw data, upsampling 3x, 5 phase/direction, 5 directions, 5 order total, 6ms
     else
-        @btime recon = recon_sim($sim_data, $prep, $sp, $rp); 
+        @btime recon = recon_sim($sim_data, $prep, $sp); 
         # upsample 3, 7 phase/direction, 7 order total, 
         # upsample 3, 5 phase/direction, 5 directions, 5 order total, 44ms
     end
