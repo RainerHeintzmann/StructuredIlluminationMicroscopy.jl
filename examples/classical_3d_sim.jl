@@ -50,10 +50,10 @@ function main()
 
     #################### process slice by slice
     rp.slice_by_slice = true
-    prep = recon_seq = nothing; GC.gc(); # to clear the memory    
-    prep = recon_sim_prepare(sim_data, pp, sp, rp); # do preallocate
+    prep_seq = prep = recon_seq = nothing; GC.gc(); # to clear the memory    
+    prep_seq = recon_sim_prepare(sim_data, pp, sp, rp); # do preallocate
     # do the slice-by-slice reconstruction
-    @time recon_seq = recon_sim(sim_data, prep, sp); # 0.8 sec (256x256x128) 
+    @time recon_seq = recon_sim(sim_data, prep_seq, sp); # 0.8 sec (256x256x128) 
 
     wf = resample(sum(sim_data, dims=ndims(sim_data))[:,:,:,1], size(recon_seq));
     @vt obj wf recon_seq 
@@ -66,7 +66,7 @@ function main()
 
     # @vv sim_data
     rp.slice_by_slice = false
-    prep = recon = nothing; GC.gc(); # to clear the memory    
+    prep_seq = prep = recon = nothing; GC.gc(); # to clear the memory    
     @time prep = recon_sim_prepare(sim_data, pp, sp, rp); # 23 sec
 
     @time recon = recon_sim(sim_data, prep, sp); # 1.3 sec (256x256x128 raw), 5.2 sec
