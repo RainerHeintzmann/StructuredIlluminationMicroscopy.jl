@@ -1,3 +1,22 @@
+"""
+    SIMParams
+
+a (mutable) structure that holds the parameters for the simulation. See details below.
+Constructor:
+SIMParams(psf_params::PSFParams, sampling::NTuple{3, Float64}, n_photons::Float64, n_photons_bg::Float64, k_peak_pos::Array{NTuple{3, Float64}, 1}, peak_phases::Array{Float64,2}, peak_strengths::Array{Float64,2}, otf_indices::Array{Int,1}=[1], otf_phases::Array{Float64,1}=[0.0])  
+
+Fields:
++ `psf_params::PSFParams` : the PSF parameters
++ `sampling::NTuple{3, Float64}` : the sampling in x, y, and z
++ `n_photons::Float64` : the number of photons
++ `n_photons_bg::Float64` : the number of background photons
++ `k_peak_pos::Array{NTuple{3, Float64}, 1}` : peak-positions in k-space, a vector of 3D tuples, in relation to the Nyquist frequency of the image
++ `peak_phases::Array{Float64,2}` : peak-phases in k-space. This is a 2D array with the first dimension being the number of peaks and the second dimension being the number of phases  (i.e. the phases in each image)
++ `peak_strengths::Array{Float64,2}` : peak-intensities in k-space. This is a 2D array with the first dimension being the number of peaks and the second dimension being the number of intensities   (i.e. the intensities of each peak in each image)
++ `otf_indices::Array{Int, 1}` : otf-indices. An array of indices that indicate the OTF to be used for each peak. Note that for three-dimensional OTFs some peaks have associated OTFs where the z-modulation is part of the OTF. Due to refractive index mismatch or misalanement of the optical axis, these OTFs are characterized by a relative phase.
++ `otf_phases::Array{Float64, 1}` : the relative phases of the OTFs, which are approximated as a multiplication of the PSF with a cos(k_z z + phase)
+
+"""
 mutable struct SIMParams
     psf_params::PSFParams
     sampling::NTuple{3, Float64}
@@ -94,6 +113,61 @@ mutable struct ReconParams
             Float64(hgoal_exp),
             Float64(hgoal_thresh),
             do_preallocate, use_measure, double_use, preshift_otfs, use_hgoal, slice_by_slice)
+    end
+end
+
+"""
+    PreparationParams(RAT)
+
+a (mutable) structure that holds the parameters for the preparation of the reconstruction algorithm. See details below.
+You can use the default constructor `PreparationParams(RAT)` to get the default values, then overwrite some entries,
+or use the named constructor to set the values. `RAT` refers to the real array type to be used with the reconstructions it should have
+one dimension less than the data to reconstruct but typically the same eltype().
+
+Fields:
++ `pinv_weight_mat::AbstractMatrix` : the pseudo-inverse weight matrix
++ `otfs::Vector{CAT}` : the OTFs
++ `pixelshifts::Vector{NTuple{3, Int}}` : the pixel shifts
++ `slice_by_slice::Bool` : slice by slice reconstruction
++ `upsample_factor::Int` : the upsampling factor
++ `final_filter::CAT` : the final filter
++ `subpixel_shifters::Vector{Any}` : the subpixel shifters
++ `ftorder::CAT` : the Fourier transform order
++ `order::CAT` : the order
++ `result::RAT` : the result
++ `result_rft::CAT` : the result in Fourier space
++ `result_rft_tmp::CAT` : the temporary result in Fourier space
++ `plan_fft!::AbstractFFTs.Plan` : the FFT plan
++ `plan_irfft::AbstractFFTs.Plan` : the iFFT plan
+
+"""    
+mutable struct PreparationParams{RAT, CAT} # , CT, D, RT, TA <: AbstractArray{CT, D}, RT = Real{CT}} 
+    pinv_weight_mat::AbstractMatrix
+    otfs::Vector{CAT}
+    pixelshifts::Vector{NTuple{3, Int}}
+    slice_by_slice::Bool
+    upsample_factor::Int
+    final_filter::CAT
+    subpixel_shifters::Vector{Any}
+
+    ftorder::CAT
+    order::CAT
+    result::RAT
+    result_rft::CAT
+    result_rft_tmp::CAT
+    plan_fft!::AbstractFFTs.Plan
+    plan_irfft::AbstractFFTs.Plan
+
+    function PreparationParams(RAT::Type)
+        CAT = complex_arr_type(RAT, Val(ndims(RAT)))
+        pinv_dummy = Array{Float64}(undef, (0,0))
+        cat_dummy = CAT(undef, ntuple((d)->1, ndims(CAT)))
+        rat_dummy = RAT(undef, ntuple((d)->0, ndims(RAT)))
+        plan_dummy = plan_fft!(cat_dummy)
+        new{RAT, CAT}(pinv_dummy, [cat_dummy,], [(0,0,0),],
+                      false, 2,
+                      cat_dummy, [],
+                      cat_dummy, cat_dummy, rat_dummy, cat_dummy, cat_dummy, plan_dummy, plan_dummy)
     end
 end
 

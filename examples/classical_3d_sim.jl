@@ -8,7 +8,7 @@ using View5D  # for visualization, @vt etc.
 using PointSpreadFunctions
 
 function main()
-    use_cuda = true;
+    use_cuda = false;
 
     lambda = 0.532; NA = 1.2; n = 1.33
     pp = PSFParams(lambda, NA, n);  # 532 nm, NA 0.25 in Water n= 1.33
@@ -60,19 +60,19 @@ function main()
 
     ##################### process by 3D SIM algorithm
 
-    println("GPU total memory: $(CUDA.total_memory()/oneGb) Gb")
+    println("GPU total memory: $(CUDA.total_memory()/1024/1024/1024) Gb")
     CUDA.memory_status(); println()    
     print_mem_usage(sim_data, prep)
 
     # @vv sim_data
     rp.slice_by_slice = false
     prep = recon = nothing; GC.gc(); # to clear the memory    
-    @time prep = recon_sim_prepare(sim_data, pp, sp, rp); # 
+    @time prep = recon_sim_prepare(sim_data, pp, sp, rp); # 23 sec
 
     @time recon = recon_sim(sim_data, prep, sp); # 1.3 sec (256x256x128 raw), 5.2 sec
     wf = resample(sum(sim_data, dims=ndims(sim_data))[:,:,:,1], size(recon));
     # @vt recon
-    @vt obj wf recon_seq  recon max.(0, recon) 
+    @vt obj wf recon max.(0, recon) recon_seq  
 
     @vt  ft(obj) ft(recon_seq)  ft(recon) ft(wf)
 

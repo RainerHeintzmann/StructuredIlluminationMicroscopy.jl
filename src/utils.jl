@@ -120,7 +120,7 @@ Parameters:
 + `order_num::Int` : order number
 """
 function shift_subpixel!(img, ordershift, prep, order_num)
-    subpixel_shifters, pixelshift = (haskey(prep, :subpixel_shifters)) ? (prep.subpixel_shifters[order_num], prep.pixelshifts[order_num]) : get_shift_subpixel(img, ordershift)
+    subpixel_shifters, pixelshift = (prod(size(prep.subpixel_shifters))>1) ? (prep.subpixel_shifters[order_num], prep.pixelshifts[order_num]) : get_shift_subpixel(img, ordershift)
     if (subpixel_shifters != 1)
         img .*= subpixel_shifters
     end

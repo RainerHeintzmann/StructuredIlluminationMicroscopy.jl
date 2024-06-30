@@ -75,7 +75,7 @@ module StructuredIlluminationMicroscopy
     using Images # for distance transform
     using SeparableFunctions
 
-    export PSFParams, SIMParams, ReconParams
+    export PSFParams, SIMParams, ReconParams, PreparationParams
     export generate_peaks, simulate_sim, recon_sim_prepare, recon_sim, make_3d_pattern, get_otfs, get_kz
     export separate_and_place_orders, modify_otf, SIMPattern, get_upsampled_rft, get_result_size, ifftshift_sep!, fftshift_sep!
     export get_shift_subpixel, pinv_weight_matrix, shift_subpixel!, shift_subpixel, shift_subpixel_fft, dot_mul_last_dim!, add!, conj_add!
