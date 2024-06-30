@@ -18,10 +18,10 @@ function main()
     num_directions = 5; num_images =  5*num_directions; num_orders = 3
 
     rel_peak = 0.80  / (num_orders-1) # peak position relative to sampling limit on fine grid
-    k_peak_pos, peak_phases, peak_strengths = generate_peaks(num_images, num_directions, num_orders, rel_peak)
-    # sp = SIMParams(pp, sampling, 0.0, 0.0, k_peak_pos, peak_phases, peak_strengths)
-    num_photons = 0.0
-    spf = SIMParams(pp, sampling, num_photons, 100.0, k_peak_pos, peak_phases, peak_strengths)
+    k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases = generate_peaks(num_images, num_directions, num_orders, rel_peak / (num_orders-1))
+
+    num_photons = 1000.0
+    spf = SIMParams(pp, sampling, num_photons, 100.0, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases);
 
     obj = Float32.(testimage("resolution_test")) # 1920x1920
     obj[(size(obj).÷2 .+1)...] = 2.0 
@@ -35,18 +35,23 @@ function main()
     #################################
 
     # @vv sim_data
-    upsample_factor = downsample_factor
-    wiener_eps = 0.00001
-    suppression_strength = 0.99
-    suppression_sigma = 1e-3
-    rp = ReconParams(suppression_sigma, suppression_strength, upsample_factor, wiener_eps)
-    do_preallocate = false; use_measure = !use_cuda
-    prep = recon_sim_prepare(sim_data, pp, sp, rp, do_preallocate; use_measure=use_measure); # do preallocate
+    rp = ReconParams() # just use defaults
+    rp.upsample_factor = downsample_factor # 1 means no upsampling
+    rp.wiener_eps = 1e-4
+    rp.suppression_strength = 0.99
+    rp.suppression_sigma = 5e-2
+    rp.do_preallocate = true
+    rp.use_measure=!use_cuda
+    rp.double_use=true; rp.preshift_otfs=true; 
+    rp.use_hgoal = true
+    rp.hgoal_exp = 0.5
+
+    prep = recon_sim_prepare(sim_data, pp, sp, rp); # do preallocate
 
     @time recon = recon_sim(sim_data, prep, sp);
     wf = (use_cuda) ? sum(sim_data, dims=3)[:,:,1] : resample(sum(sim_data, dims=3)[:,:,1], size(recon))
     # @vt recon
-    @vt wf recon obj
+    @vt obj wf recon 
 
     if use_cuda
         @btime CUDA.@sync recon = recon_sim(sim_data, prep, sp);  
@@ -55,7 +60,7 @@ function main()
     else
         @btime recon = recon_sim($sim_data, $prep, $sp); 
         # upsample 3, 7 phase/direction, 7 order total, 
-        # upsample 3, 5 phase/direction, 5 directions, 5 order total, 44ms
+        # upsample 3, 5 phase/direction, 5 directions, 5 order total, 39ms
     end
 
     @vt ft(real.(recon)) ft(wf) ft(obj)

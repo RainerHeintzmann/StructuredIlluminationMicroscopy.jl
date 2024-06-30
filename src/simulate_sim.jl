@@ -105,7 +105,7 @@ function simulate_sim(obj, pp::PSFParams, sp::SIMParams, downsample_factor::Int 
     sim_data = similar(obj, RT, dsz..., size(sp.peak_phases, 1))
     # Generate SIM illumination pattern
 
-    otfs = get_otfs(complex_arr_type(typeof(obj)), sz, pp, sp, nothing, true) # unmodified OTFs as rfts for forward simulation
+    otfs = get_otfs(complex_arr_type(typeof(obj)), sz, pp, sp, true) # unmodified OTFs as rfts for forward simulation
     
     # otf = rfft(ifftshift(h))
     # if (downsample_factor != 1.0)

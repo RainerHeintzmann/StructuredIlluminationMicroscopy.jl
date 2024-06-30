@@ -80,7 +80,7 @@ module StructuredIlluminationMicroscopy
     export separate_and_place_orders, modify_otf, SIMPattern, get_upsampled_rft, get_result_size, ifftshift_sep!, fftshift_sep!
     export get_shift_subpixel, pinv_weight_matrix, shift_subpixel!, shift_subpixel, shift_subpixel_fft, dot_mul_last_dim!, add!, conj_add!
     export rfft_crop, rfft_size, rfftshift, rifftshift, rfftshift!, rifftshift!, get_rft_center
-    export swap_vals!, fftshift!, IntType
+    export swap_vals!, fftshift!, IntType, force_integer_pixels, estimate_prep_mem, print_mem_usage
 
     include("sim_structures.jl")
     include("utils.jl")

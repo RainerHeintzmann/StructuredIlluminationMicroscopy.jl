@@ -37,14 +37,63 @@ function resample_sim_params(sp::SIMParams, resample_factor)
     return SIMParams(sp; sampling=new_sampling, k_peak_pos=new_peakpos)
 end
 
+"""
+    ReconParams
+
+a (mutable) structure that holds the parameters for the reconstruction algorithm. See details below.
+You can use the default constructor `ReconParams()` to get the default values, then overwrite some entries,
+or use the named constructor to set the values.
+
+Fields:
++ `suppression_sigma::Float64` : the sigma of the Gaussian suppression filter
++ `suppression_strength::Float64` : the strength of the Gaussian suppression filter
++ `upsample_factor::Int` : the upsampling factor
++ `wiener_eps::Float64` : the epsilon value for the Wiener filter
++ `do_preallocate::Bool` : preallocate memory for the reconstruction
++ `use_measure::Bool` : use the measurement for the reconstruction
++ `double_use::Bool` : use the measurement twice for the reconstruction
++ `preshift_otfs::Bool` : preshift the OTFs
++ `use_hgoal::Bool` : use the hgoal algorithm
++ `hgoal_exp::Float64` : the exponent of the hgoal algorithm
++ `hgoal_thresh::Float64` : threshold to determine the hgoal footprint to which the distance transform is applied to
+
+"""
 mutable struct ReconParams
     suppression_sigma::Float64
     suppression_strength::Float64
     upsample_factor::Int
+    reference_slice::Int
     wiener_eps::Float64
+    hgoal_exp::Float64
+    hgoal_thresh::Float64
+    do_preallocate::Bool
+    use_measure::Bool
+    double_use::Bool
+    preshift_otfs::Bool
+    use_hgoal::Bool
+    slice_by_slice::Bool
 
-    function ReconParams(suppression_sigma::Float64 = 0.2, suppression_strength::Float64 = 1.0, upsample_factor::Int = 2, wiener_eps::Float64 = 1e-6)    
-        new(suppression_sigma, suppression_strength, upsample_factor, wiener_eps)
+    function ReconParams(; # constructor with default values
+        suppression_sigma = 0.2,
+        suppression_strength = 1.0,
+        upsample_factor::Int = 2,
+        reference_slice::Int = 0,
+        wiener_eps = 1e-6,
+        hgoal_exp = 0.5, # only used if use_hgoal is true
+        hgoal_thresh = 2e-8, # threshold to determine the hgoal footprint to which the distance transform is applied to
+        do_preallocate=true,
+        use_measure=false, # to work with CUDA
+        double_use=true,
+        preshift_otfs=true,
+        use_hgoal=true, slice_by_slice=false)
+        new(Float64(suppression_sigma), 
+            Float64(suppression_strength), 
+            upsample_factor, 
+            reference_slice,
+            Float64(wiener_eps),
+            Float64(hgoal_exp),
+            Float64(hgoal_thresh),
+            do_preallocate, use_measure, double_use, preshift_otfs, use_hgoal, slice_by_slice)
     end
 end
 
@@ -64,7 +113,7 @@ Parameters:
 function SIMPattern(h, sp::SIMParams, n, otf_num)
     sim_pattern = zeros(eltype(h), size(h)[1:2])
     pos = idx(eltype(h), size(h)[1:2]) # , offset=CtrFFT)
-    for i in 1:size(sp.k_peak_pos, 1)
+    for i in eachindex(sp.k_peak_pos)
         k = pi.*sp.k_peak_pos[i][1:2] # sp.k_peak_pos is relative to the Nyquist frequency of the image
         if (otf_num == sp.otf_indices[i] && sp.peak_strengths[n, i] != 0.0)
             strength = sp.peak_strengths[n,i]

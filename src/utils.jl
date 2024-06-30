@@ -65,6 +65,7 @@ end
 function rifftshift!(dst, src)
     ifftshift!(dst, src, 2:ndims(src))
 end
+
 """
     rfft_crop(myrft, dsz)
 
@@ -87,13 +88,38 @@ function rfft_crop(myrft, dsz)
 end
 
 """
-    shift_subpixel!(img, ordershift, peakphase)
+    force_integer_pixels(k_peak_pos, imsz)
+
+force the peak positions to correspond to integer pixel positions during simulation.
+
+Parameters:
++ `k_peak_pos` : peak positions in k-space in relation to the Nyquist frequency
++ `imsz` : size of the image to which the integer condition is to be enforced
+
+"""
+function force_integer_pixels(k_peak_pos, imsz)
+    int_peak_pos = Vector{Tuple{Float64, Float64, Float64}}(undef, size(k_peak_pos, 1))
+    imsz = expand_size(imsz, ntuple((d)->1, length(k_peak_pos[1]))) ./ 2
+    for n in eachindex(k_peak_pos)
+        ordershift = k_peak_pos[n] .* imsz
+        int_peak_pos[n] = round.(Int, ordershift)./imsz
+    end
+    return int_peak_pos
+end
+
+"""
+    shift_subpixel!(img, ordershift, prep, order_num)
+
 
 shift the Fourier-transform of the image by subpixel values and returns the pixelshift.
+
+Parameters:
++ `img::AbstractArray` : image
++ `ordershift::NTuple{3, Float64}` : subpixel shift
++ `prep::ReconPrep` : reconstruction preparation object
++ `order_num::Int` : order number
 """
 function shift_subpixel!(img, ordershift, prep, order_num)
-    # pos = idx(eltype(img), size(img))
-    # img .*= cis.(dot.(Ref(2pi .* subpixelshift ./ size(img)), pos))
     subpixel_shifters, pixelshift = (haskey(prep, :subpixel_shifters)) ? (prep.subpixel_shifters[order_num], prep.pixelshifts[order_num]) : get_shift_subpixel(img, ordershift)
     if (subpixel_shifters != 1)
         img .*= subpixel_shifters
@@ -101,37 +127,17 @@ function shift_subpixel!(img, ordershift, prep, order_num)
     return (pixelshift[1:2]..., 0)
 end
 
+
 """
-    shift_subpixel(img, ordershift)
+    fftshift_sep!(myseparable)
 
 modifies a separable function representation of a pixel-shifter (to be multiplied with the FFT) by appying fftshift to each of its separable components.
-
-Parameters:
-+ `img::AbstractArray` : image
-+ `ordershift::NTuple{3, Float64}` : subpixel shift
 
 """
 function fftshift_sep!(myseparable)
     for d in 1:length(myseparable.args)
         myseparable.args[d].parent .= fftshift(myseparable.args[d].parent)
     end
-    return myseparable
-end
-
-"""
-    ifftshift_sep!(myseparable)
-
-modifies a separable function representation of a pixel-shifter (to be multiplied with the FFT) by appying ifftshift to each of its separable components.
-
-Parameters:
-+ `myseparable::SeparableFunction` : separable function
-
-"""    
-function ifftshift_sep!(myseparable)
-    for d in 1:length(myseparable.args)
-        myseparable.args[d].parent .= ifftshift(myseparable.args[d].parent)
-    end
-    # myseparable.args = ntuple((i) -> fftshift(myseparable.args[i]), length(myseparable.args))
     return myseparable
 end
 
@@ -148,9 +154,25 @@ function get_shift_subpixel(img, ordershift)
     end
 
     mysepshift = exp_ikx_sep(typeof(img), size(img)[1:2]; shift_by= .-subpixelshift) # should be negative to agree with integer pixel shifts
-    # ifftshift_sep!(mysepshift) # due to the shifing being in the iFFT space and not the FFT space
     return mysepshift, pixelshift
 end
+
+"""
+    ifftshift_sep!(myseparable)
+
+modifies a separable function representation of a pixel-shifter (to be multiplied with the FFT) by appying ifftshift to each of its separable components.
+
+Parameters:
++ `myseparable::SeparableFunction` : separable function
+
+"""    
+function ifftshift_sep!(myseparable)
+    for d in 1:length(myseparable.args)
+        myseparable.args[d].parent .= ifftshift(myseparable.args[d].parent)
+    end
+    return myseparable
+end
+
 
 """
     dot_mul_last_dim!(orders, sim_data, myinv, n, Eps = 1e-7)
@@ -163,7 +185,6 @@ function dot_mul_last_dim!(order, sim_data, myinv, n, Eps = 1e-7)
     CT = Complex{RT}
     contributing = findall(x->abs(x) .> Eps, myinv[n,:])
     sub_matrix = CT.(myinv[n, contributing])
-    # mydstidx = ntuple(d->(d==ndims(sim_data)) ? (n:n) : Colon(), ndims(sim_data))
     dv = order # @view orders[mydstidx...] # destination view to write into
     w = sub_matrix[1]
     mymd = ntuple(d->(d==ndims(sim_data)) ? contributing[1] : Colon(), ndims(sim_data))
@@ -234,8 +255,9 @@ Parameters:
 """
 function modify_otf(otf, sigma=0.1, contrast=1.0)
     RT = real(eltype(otf))
-    return otf .* (one(RT) .- RT(contrast) .* exp.(-rr2(RT, size(otf)[1:2], scale=ScaFT)/(2*sigma^2)))
+    return otf .* real_arr_type(typeof(otf), Val(2))(one(RT) .- RT(contrast) .* exp.(-rr2(RT, size(otf)[1:2], scale=ScaFT)/(2*sigma^2)))
 end
+
 
 """
     swap_vals!(v1, v2)
@@ -289,4 +311,38 @@ function fftshift_even!(dst, dims=1:ndims(dst))
         swap_vals!(view(dstr, first_half...), view(dstr, second_half...))
     end
     return dst
+end
+
+function estimate_prep_mem(prep)
+    res = sizeof(prep.result) + sizeof(prep.result_rft_tmp) + sizeof(prep.order) + sizeof(prep.ftorder) + sizeof(prep.final_filter)
+    if (pointer(prep.result_rft) != pointer(prep.result))
+        res += sizeof(prep.result_rft)
+    end
+    otf_mem = []
+    for myotf in prep.otfs
+        if !(pointer(myotf) in otf_mem)
+            res += sizeof(myotf)
+            push!(otf_mem, pointer(myotf))
+        end
+    end
+    
+    return res
+end
+
+"""
+    print_mem_usage(sim_data, prep)
+
+estimates and prints the memory usage of the `sim_data` and `prep` structure.
+"""
+function print_mem_usage(sim_data, prep)
+    oneGb = 1024*1024*1024
+    println("Free system memory usage: $(Sys.free_memory()/oneGb) Gb")
+    println("Total memory available: $(Sys.total_memory()/oneGb) Gb")
+    # (sum(sizeof.(values(prep))) - sizeof(prep.result))/ 1024 /1024 # 42 Mb, or 33 Mb with reuse of memory
+    est_mem = (typeof(prep)<:NamedTuple) ? estimate_prep_mem(prep)/oneGb : 0.0;
+    println("Est. prep size: $(est_mem) Gb") # / 1024 /1024 # 42 Mb, or 33 Mb with reuse of memory
+    # println("all prep objects: $(sum(sizeof.(values(prep)))/oneGb) Gb") # / 1024 /1024 # 42 Mb, or 33 Mb with reuse of memory
+    dat_mem = sizeof(sim_data)/oneGb
+    println("sim_data: $(dat_mem) Gb") # / 1024 /1024 # 42 Mb, or 33 Mb with reuse of memory    
+    println("Total mem: $(dat_mem + est_mem) Gb") # / 1024 /1024 # 42 Mb, or 33 Mb with reuse of memory    
 end
