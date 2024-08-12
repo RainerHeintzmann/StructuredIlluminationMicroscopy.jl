@@ -17,7 +17,7 @@ function main()
     rel_peak = 0.40 # peak position relative to sampling limit on fine grid
     k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases = generate_peaks(num_images, num_directions, num_orders, rel_peak / (num_orders-1))
 
-    num_photons = 1000.0
+    num_photons = 1000.00
     spf = SIMParams(pp, sampling, num_photons, 100.0, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases);
 
     obj = Float32.(testimage("resolution_test_512"));
