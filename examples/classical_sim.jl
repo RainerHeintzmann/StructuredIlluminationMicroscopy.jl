@@ -6,7 +6,7 @@ using FourierTools # for resampling and diagnostic purposes
 using View5D  # for visualization, @vt etc.
 
 function main()
-    use_cuda = false;
+    use_cuda = true;
 
     lambda = 0.532; NA = 1.0; n = 1.52
     pp = PSFParams(lambda, NA, n);  # 532 nm, NA 0.25 in Water n= 1.33
@@ -52,7 +52,7 @@ function main()
     prep = recon_sim_prepare(sim_data, pp, sp, rp); # do preallocate
 
     @time recon = recon_sim(sim_data, prep, sp);
-    wf = resample(sum(sim_data, dims=3)[:,:,1], size(recon))
+    CUDA.@allowscalar wf = resample(sum(sim_data, dims=3)[:,:,1], size(recon))
     # @vt recon
     @vt obj wf recon 
 
