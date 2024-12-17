@@ -74,6 +74,8 @@ module StructuredIlluminationMicroscopy
     using Noise # for poisson simulation
     using Images # for distance transform
     using SeparableFunctions
+    using Statistics # for mean
+    using FindShift # for subpixel correlation
 
     export PSFParams, SIMParams, ReconParams, PreparationParams
     export generate_peaks, simulate_sim, recon_sim_prepare, recon_sim, make_3d_pattern, get_otfs, get_kz
@@ -81,10 +83,12 @@ module StructuredIlluminationMicroscopy
     export get_shift_subpixel, pinv_weight_matrix, shift_subpixel!, shift_subpixel, shift_subpixel_fft, dot_mul_last_dim!, add!, conj_add!
     export rfft_crop, rfft_size, rfftshift, rifftshift, rfftshift!, rifftshift!, get_rft_center
     export swap_vals!, fftshift!, IntType, force_integer_pixels, estimate_prep_mem, print_mem_usage
+    export estimate_parameters
 
     include("sim_structures.jl")
     include("utils.jl")
     include("simulate_sim.jl")
     include("classical_sim.jl")
+    include("parameter_estimation.jl")
 
 end

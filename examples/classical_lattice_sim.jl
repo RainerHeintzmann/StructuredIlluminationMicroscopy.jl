@@ -17,7 +17,7 @@ function main()
     rel_peak = 0.40 # peak position relative to sampling limit on fine grid
     k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases = generate_peaks(num_images, num_directions, num_orders, rel_peak / (num_orders-1))
 
-    num_photons = 0.0 # 1000.00
+    num_photons = 1000.00
     spf = SIMParams(pp, sampling, num_photons, 100.0, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases);
 
     obj = Float32.(testimage("resolution_test_512"));
@@ -49,25 +49,12 @@ function main()
     rp.double_use=true; rp.preshift_otfs=true; 
     rp.use_hgoal = true
     rp.hgoal_exp = 0.5
-
-    k_vecs = [[102, 0,0],[-51, 89,0],[-51, -89, 0]]
-    fff = estimate_parameters(sim_data; pp=sp.psf_params, sampling=sp.sampling, k_vecs=k_vecs,
-                            num_directions=num_directions, prefilter_correl=false)
-
-    sp.k_peak_pos
-    fff.k_peak_pos
-    sp.peak_phases # .- 1.492
-    fff.peak_phases # .- 1.492 
-    
     prep = recon_sim_prepare(sim_data, pp, sp, rp); # do preallocate
+
     @time recon = recon_sim(sim_data, prep, sp);
-    CUDA.@allowscalar wf = resample(sum(sim_data, dims=3)[:,:,1], size(recon))
+    wf = resample(sum(sim_data, dims=3)[:,:,1], size(recon))
     # @vt recon
     @vt obj wf recon 
-
-    prep2 = recon_sim_prepare(sim_data, pp, fff, rp); # do preallocate
-    @time recon2 = recon_sim(sim_data, prep2, fff);
-    @vt recon2 
 
     if use_cuda
         @btime CUDA.@sync recon = recon_sim(sim_data, prep, sp);  # 480 µs (one zero order, 256x256)
