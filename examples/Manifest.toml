@@ -1363,7 +1363,7 @@ version = "1.2.1"
 
 [[deps.NDTools]]
 deps = ["LinearAlgebra", "OffsetArrays", "PaddedViews", "Random", "Statistics"]
-git-tree-sha1 = "6ec3344ccc0d76354824ccfce80d3568e1a80138"
+path = "../../NDTools.jl"
 uuid = "98581153-e998-4eef-8d0d-5ec2c052313d"
 version = "0.7.0"
 

@@ -15,14 +15,56 @@ The function returns the estimated parameters for the SIM image.
 - `k_vecs::Array`: The k vectors.
 - `prefilter_correl::Bool`: If true, prefilter the correlation using the PSF. Default is true. 0.05 may be a useful value.
 - `subtract_mean::Bool`: If true, subtract the mean. Default is true.
-- `suppress_sigma::Int`: The width of the center to suppress if > 0. As a ratio of the size. Default is 0.
+- `suppress_sigma`: The width of the center to suppress if > 0. As a ratio of the size. Default is 0.
+- 'num_directions': Number of directions. Default is 0 which means each frame contains all directions. 
+                    If provided, it is assumed that the trailing dimension is subdivided into directions and phases per direction.
 
 """
 function estimate_parameters(dat, refdat=nothing; pp::PSFParams, k_vecs=nothing, mypsf=nothing,
-                            prefilter_correl=true, subtract_mean=true, suppress_sigma=0.0, sampling=(0.1, 0.1, 0.1))
+                            prefilter_correl=true, subtract_mean=true, upsample=false, suppress_sigma=0.0, sampling=(0.1, 0.1, 0.1), num_directions=0)
+
+    if num_directions > 0
+        num_phases = size(dat, ndims(dat)) ÷ num_directions;
+        if num_phases * num_directions != size(dat, ndims(dat))
+            error("The number of phases times the number of directions must equal the number of frames.")
+        end
+        spf = nothing
+        for d in 1:num_directions
+            sub_data = slice(dat, ndims(dat), (d-1)*num_phases+1:d*num_phases)
+            k_vec = nothing
+            if !isnothing(k_vecs)
+                k_vec = [k_vecs[d]]
+            end
+            spf_sub = estimate_parameters(sub_data, refdat; pp=pp, k_vecs=k_vec, mypsf=mypsf, 
+                                            prefilter_correl=prefilter_correl, 
+                                            subtract_mean=subtract_mean, suppress_sigma=suppress_sigma, 
+                                            sampling=sampling, num_directions=0)
+            if (d == 1)
+                spf = spf_sub
+            else
+                num_orders = size(spf_sub.k_peak_pos, 1)
+                spf.otf_indices = vcat(spf.otf_indices, 1)
+                spf.otf_phases = vcat(spf.otf_phases, 1)
+                spf.k_peak_pos = vcat(spf.k_peak_pos, spf_sub.k_peak_pos[2:end])
+                @show size(spf.peak_phases)
+                @show size(spf_sub.peak_phases)
+                spf.peak_phases = hcat(spf.peak_phases, zeros(size(spf.peak_phases, 1), num_orders-1))
+                spf.peak_phases = vcat(spf.peak_phases, zeros(num_phases, size(spf.peak_phases,2)))
+                @show (num_orders-2)
+                spf.peak_phases[end-num_phases+1:end, end-(num_orders-2):end] = spf_sub.peak_phases[:,2:end]
+
+                spf.peak_strengths = hcat(spf.peak_strengths, zeros(size(spf.peak_strengths, 1), num_orders-1))
+                spf.peak_strengths = vcat(spf.peak_strengths, zeros(num_phases, size(spf.peak_strengths,2)))
+                spf.peak_strengths[end-num_phases+1:end, end-(num_orders-2):end] = spf_sub.peak_strengths[:,2:end]
+                spf.peak_strengths[end-num_phases+1:end, 1] .= 1.0
+            end
+        end
+        return spf
+    end
     # psf = abs2.(ift(rr(size(dat)[1:2]) .< 0.25*size(dat,1)))
     # psf ./= sum(psf)
     cs = size(dat)[1:2]
+    # preprocess the data according to the settings
     cropped = let
         if (subtract_mean)
             mymean = mean(dat, dims=ndims(dat)) 
@@ -38,7 +80,8 @@ function estimate_parameters(dat, refdat=nothing; pp::PSFParams, k_vecs=nothing,
             Float32.(dat)
         end
     end
-    peak_ref = cropped[:,:,1]
+
+    # select the PSF to use for prefiltering
     corr_psf = let
         if (prefilter_correl)
             if isnothing(mypsf)
@@ -50,20 +93,27 @@ function estimate_parameters(dat, refdat=nothing; pp::PSFParams, k_vecs=nothing,
             nothing
         end
     end
+
+    # modify the PSF to suppress the low frequencies, if wanted
     if !isnothing(corr_psf) && (suppress_sigma > 0)
         # construct a 1-gaussian to suppress the low frequencies of the PSF
         gs = ifftshift(1 .- gaussian_sep(real_arr_type(typeof(corr_psf)), size(corr_psf); sigma=suppress_sigma .* size(corr_psf)))
         corr_psf = ifft(fft(corr_psf) .* gs)
     end
+
+    # use the first provided image as the one to correlate with the reference.
+    # The prefiltering is done in get_subpixel_correl.
+    peak_ref = @view cropped[:,:,1]
+
     if isnothing(k_vecs)
-        k_vecs, _, _ = get_subpixel_correl(peak_ref; other=refdat, psf=corr_psf, upsample=false, correl_mask=nothing, interactive=true)
+        k_vecs, _, _ = get_subpixel_correl(peak_ref; other=refdat, psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=true)
     else
-        k_vecs, _, _ = get_subpixel_correl(peak_ref; other=refdat, k_est = k_vecs,  psf=corr_psf, upsample=false, correl_mask=nothing, interactive=false)
+        k_vecs, _, _ = get_subpixel_correl(peak_ref; other=refdat, k_est = k_vecs,  psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=false)
     end
     # find_shift(dat[:,:,1], dat[:,:,1])
-    # k_vec, phase, amp = get_subpixel_correl(cropped;  psf=psf_cropped, upsample=false, k_est=(509, -308))
+    # k_vec, phase, amp = get_subpixel_correl(cropped;  psf=psf_cropped, upsample=upsample, k_est=(509, -308))
 
-    # @show k_vecs
+    println("You can call this function with the k_vecs parameter $(k_vecs) to speed up the estimation.")
     to_tuple = (t) -> (((2 .* t[1:2] ./ (size(dat)[1:2])...,))..., 0.0)
     k_peak_pos = [(0.0, 0.0, 0.0), to_tuple.(k_vecs)...]
     # k_peak_pos = [(0.0, 0.0, 0.0), (2 .* k_vecs ./ size(dat))...]
@@ -72,7 +122,7 @@ function estimate_parameters(dat, refdat=nothing; pp::PSFParams, k_vecs=nothing,
     peak_phases = zeros(size(dat, 3), length(k_peak_pos))
     peak_strengths = zeros(size(dat, 3), length(k_peak_pos))
     for p in axes(cropped, ndims(cropped))
-        _, res_phase, res_amp = get_subpixel_correl(cropped[:,:,p];  method = :FindPhase, psf=corr_psf, upsample=false, correl_mask=nothing, interactive=false, k_est=k_vecs)
+        _, res_phase, res_amp = get_subpixel_correl(cropped[:,:,p];  method = :FindPhase, psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=false, k_est=k_vecs)
         peak_phases[p, 1] = 0
         peak_phases[p, 2:end] = res_phase
         peak_strengths[p, 2:end] = res_amp
