@@ -106,9 +106,13 @@ Parameters:
 + `sampling::Tuple` : sampling in µm
 + `downsample_factor::Float64` : downsample factor (e.g. 2.0 means half the number of pixels in each dimension)
 """
-function simulate_sim(obj, pp::PSFParams, sp::SIMParams, downsample_factor::Int = 1)
+function simulate_sim(obj, pp::PSFParams, sp::SIMParams, downsample_factor::Int = 1; mypsf=nothing)
     sz = size(obj)
-    h = psf(sz, pp; sampling=sp.sampling);  # sampling is 0.5 x 0.5 x 2.0 µm
+    if isnothing(mypsf)
+        h = psf(sz, pp; sampling=sp.sampling);  # sampling is 0.5 x 0.5 x 2.0 µm
+    else
+        h = mypsf
+    end
     nd_downsample_factor = ntuple((d) -> (d<=2) ? downsample_factor : 1, length(sz))
     dsz = Int.(round.(sz ./ nd_downsample_factor))
 

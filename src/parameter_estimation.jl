@@ -21,8 +21,8 @@ The function returns the estimated parameters for the SIM image.
 
 """
 function estimate_parameters(dat, refdat=nothing; pp::PSFParams, k_vecs=nothing, mypsf=nothing,
-                            prefilter_correl=true, subtract_mean=true, upsample=false, suppress_sigma=0.0, sampling=(0.1, 0.1, 0.1), num_directions=0)
-
+                            prefilter_correl=true, subtract_mean=true, upsample=false, suppress_sigma=0.0, 
+                            sampling=(0.1, 0.1, 0.1), num_directions=0, ideal_strength=true)
     if num_directions > 0
         num_phases = size(dat, ndims(dat)) ÷ num_directions;
         if num_phases * num_directions != size(dat, ndims(dat))
@@ -38,7 +38,7 @@ function estimate_parameters(dat, refdat=nothing; pp::PSFParams, k_vecs=nothing,
             spf_sub = estimate_parameters(sub_data, refdat; pp=pp, k_vecs=k_vec, mypsf=mypsf, 
                                             prefilter_correl=prefilter_correl, 
                                             subtract_mean=subtract_mean, suppress_sigma=suppress_sigma, 
-                                            sampling=sampling, num_directions=0)
+                                            sampling=sampling, num_directions=0, ideal_strength=ideal_strength)
             if (d == 1)
                 spf = spf_sub
             else
@@ -46,35 +46,32 @@ function estimate_parameters(dat, refdat=nothing; pp::PSFParams, k_vecs=nothing,
                 spf.otf_indices = vcat(spf.otf_indices, 1)
                 spf.otf_phases = vcat(spf.otf_phases, 1)
                 spf.k_peak_pos = vcat(spf.k_peak_pos, spf_sub.k_peak_pos[2:end])
-                @show size(spf.peak_phases)
-                @show size(spf_sub.peak_phases)
                 spf.peak_phases = hcat(spf.peak_phases, zeros(size(spf.peak_phases, 1), num_orders-1))
                 spf.peak_phases = vcat(spf.peak_phases, zeros(num_phases, size(spf.peak_phases,2)))
-                @show (num_orders-2)
                 spf.peak_phases[end-num_phases+1:end, end-(num_orders-2):end] = spf_sub.peak_phases[:,2:end]
 
                 spf.peak_strengths = hcat(spf.peak_strengths, zeros(size(spf.peak_strengths, 1), num_orders-1))
                 spf.peak_strengths = vcat(spf.peak_strengths, zeros(num_phases, size(spf.peak_strengths,2)))
                 spf.peak_strengths[end-num_phases+1:end, end-(num_orders-2):end] = spf_sub.peak_strengths[:,2:end]
-                spf.peak_strengths[end-num_phases+1:end, 1] .= 1.0
+                spf.peak_strengths[end-num_phases+1:end, 1] .= spf_sub.peak_strengths[:,1]
             end
         end
+        spf.peak_strengths ./= maximum(spf.peak_strengths)
         return spf
     end
     # psf = abs2.(ift(rr(size(dat)[1:2]) .< 0.25*size(dat,1)))
     # psf ./= sum(psf)
     cs = size(dat)[1:2]
     # preprocess the data according to the settings
+    mymean = mean(dat, dims=ndims(dat)) 
     cropped = let
         if (subtract_mean)
-            mymean = mean(dat, dims=ndims(dat)) 
             if isnothing(refdat)
                 refdat = mymean 
             end
-            Float32.(dat) .- Float32.(mymean) .* sum(dat[:,:,1]) ./ sum(mymean)
+            Float32.(dat) .- Float32.(mymean) .* sum(dat, dims=(1:ndims(dat)-1)) ./ sum(mymean)
         else
             if isnothing(refdat)
-                mymean = mean(dat, dims=ndims(dat))
                 refdat = mymean
             end
             Float32.(dat)
@@ -118,18 +115,21 @@ function estimate_parameters(dat, refdat=nothing; pp::PSFParams, k_vecs=nothing,
     k_peak_pos = [(0.0, 0.0, 0.0), to_tuple.(k_vecs)...]
     # k_peak_pos = [(0.0, 0.0, 0.0), (2 .* k_vecs ./ size(dat))...]
 
-    # @show length(k_peak_pos)
     peak_phases = zeros(size(dat, 3), length(k_peak_pos))
     peak_strengths = zeros(size(dat, 3), length(k_peak_pos))
-    for p in axes(cropped, ndims(cropped))
-        _, res_phase, res_amp = get_subpixel_correl(cropped[:,:,p];  method = :FindPhase, psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=false, k_est=k_vecs)
-        peak_phases[p, 1] = 0
+    for p in axes(cropped, ndims(cropped)) # phases
+        _, res_phase, res_amp = get_subpixel_correl(cropped[:,:,p];  other=refdat, method = :FindPhase, psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=false, k_est=k_vecs)
+        peak_phases[p, 1] = 0 # peak phase of zero order is always zero
         peak_phases[p, 2:end] = res_phase
-        peak_strengths[p, 2:end] = res_amp
-        peak_strengths[p, 1] = sum(cropped) / sqrt(prod(size(cropped)))
+        peak_strengths[p, 2:end] .= (ideal_strength) ? 1.0 : res_amp
+        central =  mymean .* sum(dat[:,:,p]) ./ sum(mymean)
+        _, _, res_amp = get_subpixel_correl(central;  other=refdat, method = :FindPhase, psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=false, k_est=(0.0,0.0,0.0))
+        peak_strengths[p, 1] = (ideal_strength) ? 1.0 : res_amp # sum(cropped[:,:,p] .* refdat, dims=p) # / prod(size(cropped))
     end
-    peak_strengths = peak_strengths ./ maximum(peak_strengths[:,2:end])
-    peak_strengths = ones(size(peak_strengths)...)
+
+    # if (ideal_strength)
+    #     peak_strengths = ones(size(peak_strengths)...)
+    # end
 
     num_photons = 0.0 # ignore this
     bg_photons = 0.0

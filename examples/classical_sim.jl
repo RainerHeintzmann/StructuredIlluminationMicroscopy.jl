@@ -50,9 +50,10 @@ function main()
     rp.use_hgoal = true
     rp.hgoal_exp = 0.5
 
-    k_vecs = [[102, 0,0],[-51, 89,0],[-51, -89, 0]]
+    k_vecs = [(102, 0,0),(-51, 89,0),(-51, -89, 0)]
+    k_vecs = nothing
     fff = estimate_parameters(sim_data; pp=sp.psf_params, sampling=sp.sampling, k_vecs=k_vecs,
-                            num_directions=num_directions, prefilter_correl=false)
+                            num_directions=num_directions, prefilter_correl=true)
 
     sp.k_peak_pos
     fff.k_peak_pos

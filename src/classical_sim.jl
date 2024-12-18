@@ -79,7 +79,7 @@ function separate_and_place_orders(sim_data, sp::SIMParams, prep)
 end
 
 """
-    get_otfs(ACT, sz, pp::PSFParams, sp::SIMParams, rp, use_rft = false)
+    get_otfs(ACT, sz, pp::PSFParams, sp::SIMParams, rp, use_rft = false, mypsf=nothing)
 
 Generate the OTFs for the SIM reconstruction by first simulating a PSF and then (optionally)
 creating according to sp.otf_indices the z-modified OTFs for the SIM reconstruction.
@@ -93,9 +93,11 @@ Parameters:
 + `use_rft` : use RFT instead of FFT
 
 """
-function get_otfs(ACT, sz, pp::PSFParams, sp::SIMParams, use_rft = false; do_modify=false)
+function get_otfs(ACT, sz, pp::PSFParams, sp::SIMParams, use_rft = false; do_modify=false, mypsf=nothing)
     RT = real(eltype(ACT))
-    h = psf(sz, pp; sampling=sp.sampling)
+    if isnothing(mypsf)
+        mypsf = psf(sz, pp; sampling=sp.sampling)
+    end
     num_otf_indices = maximum(sp.otf_indices)
     otfs = Array{ACT}(undef, num_otf_indices)
     pz = let
@@ -105,11 +107,11 @@ function get_otfs(ACT, sz, pp::PSFParams, sp::SIMParams, use_rft = false; do_mod
             1.0
         end
     end
-    hm = h
+    hm = mypsf
     for i in eachindex(otfs)
         kz = pi*sp.k_peak_pos[i][3]
         if (kz != 0.0)
-            hm = h .* cos.(pz .* kz .+ sp.peak_phases[i])
+            hm = mypsf .* cos.(pz .* kz .+ sp.peak_phases[i])
         end
         myotf = (use_rft) ? rfft(ifftshift(hm)) : fftshift(fft(ifftshift(hm)))
         otfs[i] = myotf
@@ -118,7 +120,7 @@ function get_otfs(ACT, sz, pp::PSFParams, sp::SIMParams, use_rft = false; do_mod
 end
 
 """
-    get_modified_otfs(ACT, sz, pp::PSFParams, sp::SIMParams, rp, use_rft = false; do_modify=false)
+    get_modified_otfs(ACT, sz, pp::PSFParams, sp::SIMParams, rp, use_rft = false; do_modify=false, mypsf=nothing)
 
 Generate the OTFs for the SIM reconstruction by first simulating a PSF and then (optionally)
 creating according to sp.otf_indices the z-modified OTFs for the SIM reconstruction.
@@ -134,8 +136,8 @@ Parameters:
 + `do_modify` : modify the OTFs with a suppression filter
 
 """
-function get_modified_otfs(ACT, sz, pp::PSFParams, sp::SIMParams, rp, use_rft = false; do_modify=false)    
-    otfs = get_otfs(ACT, sz, pp, sp, use_rft)
+function get_modified_otfs(ACT, sz, pp::PSFParams, sp::SIMParams, rp, use_rft = false; do_modify=false, mypsf=nothing)    
+    otfs = get_otfs(ACT, sz, pp, sp, use_rft; do_modify=do_modify, mypsf=mypsf)
     if do_modify
         for i in eachindex(otfs)
             otfs[i] = modify_otf(otfs[i], rp.suppression_sigma, rp.suppression_strength) # applies central peak suppression
@@ -226,7 +228,7 @@ Parameters:
 + `rp::ReconParams` : Reconstruction parameters. See the help for ReconParams for more information.
 
 """
-function recon_sim_prepare(sim_data, pp::PSFParams, sp::SIMParams, rp::ReconParams)
+function recon_sim_prepare(sim_data, pp::PSFParams, sp::SIMParams, rp::ReconParams; mypsf = nothing)
     ACT = complex_arr_type(typeof(sim_data), Val(ndims(sim_data)-1)) # typeof(sim_data[ids...] .+ 0im)
     ART = real_arr_type(typeof(sim_data), Val(ndims(sim_data)-1)) # typeof(sim_data[ids...] .+ 0im)
     prep = PreparationParams(ART)
@@ -236,7 +238,7 @@ function recon_sim_prepare(sim_data, pp::PSFParams, sp::SIMParams, rp::ReconPara
         if (rp.slice_by_slice && length(imsz)>2 && imsz[3] > 1)
             reference_slice = (rp.reference_slice == 0) ? imsz[3] ÷ 2 + 1 : rp.reference_slice
             sim_data = sim_data[:,:,reference_slice,:]
-            prep = recon_sim_prepare(sim_data, pp, sp, rp)
+            prep = recon_sim_prepare(sim_data, pp, sp, rp; mypsf=mypsf)
             return prep
         end
 
@@ -247,7 +249,7 @@ function recon_sim_prepare(sim_data, pp::PSFParams, sp::SIMParams, rp::ReconPara
         prep.upsample_factor = rp.upsample_factor
 
         # construct the modified reconstruction OTF
-        prep.otfs = get_modified_otfs(ACT, sz[1:end-1], pp, sp, rp, do_modify=true)
+        prep.otfs = get_modified_otfs(ACT, sz[1:end-1], pp, sp, rp; do_modify=true, mypsf=mypsf)
 
         # calculate the pseudo-inverse of the weight-matrix constructed from the information in the SIMParams object
         prep.pinv_weight_mat = pinv_weight_matrix(sp)
