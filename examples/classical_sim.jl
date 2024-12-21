@@ -1,7 +1,7 @@
 using StructuredIlluminationMicroscopy
 using TestImages
-using BenchmarkTools
-using CUDA
+# using BenchmarkTools
+# using CUDA
 using FourierTools # for resampling and diagnostic purposes
 using View5D  # for visualization, @vt etc.
 
@@ -51,9 +51,9 @@ function main()
     rp.hgoal_exp = 0.5
 
     k_vecs = [(102, 0,0),(-51, 89,0),(-51, -89, 0)]
-    k_vecs = nothing
+    # k_vecs = nothing
     fff = estimate_parameters(sim_data; pp=sp.psf_params, sampling=sp.sampling, k_vecs=k_vecs,
-                            num_directions=num_directions, prefilter_correl=true)
+                            num_directions=num_directions, prefilter_correl=true, ideal_strength=false)
 
     sp.k_peak_pos
     fff.k_peak_pos

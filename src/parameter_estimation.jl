@@ -122,6 +122,7 @@ function estimate_parameters(dat, refdat=nothing; pp::PSFParams, k_vecs=nothing,
         peak_phases[p, 1] = 0 # peak phase of zero order is always zero
         peak_phases[p, 2:end] = res_phase
         peak_strengths[p, 2:end] .= (ideal_strength) ? 1.0 : res_amp
+        # calculate similarly for the zero order
         central =  mymean .* sum(dat[:,:,p]) ./ sum(mymean)
         _, _, res_amp = get_subpixel_correl(central;  other=refdat, method = :FindPhase, psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=false, k_est=(0.0,0.0,0.0))
         peak_strengths[p, 1] = (ideal_strength) ? 1.0 : res_amp # sum(cropped[:,:,p] .* refdat, dims=p) # / prod(size(cropped))
