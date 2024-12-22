@@ -1,17 +1,15 @@
 
 """
-    estimate_parameters(dat, refdat=nothing; mypsf=nothing, subtract_mean=true, pp::PSFParams=PSFParams(), sampling=(0.11, 0.11, 0.1), prefilter_correl=true, k_vecs=nothing)
+    estimate_parameters(dat, mypsf=nothing, refdat=nothing; mypsf=nothing, subtract_mean=true, prefilter_correl=true, k_vecs=nothing)
 
 Estimate the parameters for a SIM image from the experimatal data. This function is used to estimate the parameters for the SIM image from the experimental data. The function uses the experimental data to estimate the parameters for the SIM image.
 The function returns the estimated parameters for the SIM image.
 
 # Arguments
 - `dat::Array`: The experimental data.
-- `refdat::Array`: The reference data.
 - `mypsf::Array`: Optional parameter specifying the PSF to use for prefiltering.
+- `refdat::Array`: The reference data.
 - `subtract_mean::Bool`: Subtract the mean.
-- `pp::PSFParams`: The PSF parameters, which are used to generate the PSF, if the PSF is not provided.
-- `sampling::Tuple`: The sampling. Default is (0.1, 0.1, 0.1), each in µm.
 - `k_vecs::Array`: The k vectors.
 - `prefilter_correl::Bool`: If true, prefilter the correlation using the PSF. Default is true. 0.05 may be a useful value.
 - `subtract_mean::Bool`: If true, subtract the mean. Default is true.
@@ -20,9 +18,9 @@ The function returns the estimated parameters for the SIM image.
                     If provided, it is assumed that the trailing dimension is subdivided into directions and phases per direction.
 
 """
-function estimate_parameters(dat, refdat=nothing; pp::PSFParams, k_vecs=nothing, mypsf=nothing,
+function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
                             prefilter_correl=true, subtract_mean=true, upsample=false, suppress_sigma=0.0, 
-                            sampling=(0.1, 0.1, 0.1), num_directions=0, ideal_strength=true)
+                            num_directions=0, ideal_strength=true)
     if num_directions > 0
         num_phases = size(dat, ndims(dat)) ÷ num_directions;
         if num_phases * num_directions != size(dat, ndims(dat))
@@ -35,10 +33,10 @@ function estimate_parameters(dat, refdat=nothing; pp::PSFParams, k_vecs=nothing,
             if !isnothing(k_vecs)
                 k_vec = [k_vecs[d]]
             end
-            spf_sub = estimate_parameters(sub_data, refdat; pp=pp, k_vecs=k_vec, mypsf=mypsf, 
+            spf_sub = estimate_parameters(sub_data, mypsf, refdat; k_vecs=k_vec,  
                                             prefilter_correl=prefilter_correl, 
                                             subtract_mean=subtract_mean, suppress_sigma=suppress_sigma, 
-                                            sampling=sampling, num_directions=0, ideal_strength=ideal_strength)
+                                            num_directions=0, ideal_strength=ideal_strength)
             if (d == 1)
                 spf = spf_sub
             else
@@ -79,17 +77,17 @@ function estimate_parameters(dat, refdat=nothing; pp::PSFParams, k_vecs=nothing,
     end
 
     # select the PSF to use for prefiltering
-    corr_psf = let
-        if (prefilter_correl)
-            if isnothing(mypsf)
-                psf(cs, pp; sampling=sampling)
-            else
-                mypsf
-            end
-        else
-            nothing
-        end
-    end
+    corr_psf = mypsf ./ sum(mypsf) # let
+    #     if (prefilter_correl)
+    #         if isnothing(mypsf)
+    #             psf(cs, pp; sampling=sampling)
+    #         else
+    #             mypsf
+    #         end
+    #     else
+    #         nothing
+    #     end
+    # end
 
     # modify the PSF to suppress the low frequencies, if wanted
     if !isnothing(corr_psf) && (suppress_sigma > 0)
@@ -118,14 +116,12 @@ function estimate_parameters(dat, refdat=nothing; pp::PSFParams, k_vecs=nothing,
     peak_phases = zeros(size(dat, 3), length(k_peak_pos))
     peak_strengths = zeros(size(dat, 3), length(k_peak_pos))
     for p in axes(cropped, ndims(cropped)) # phases
-        _, res_phase, res_amp = get_subpixel_correl(cropped[:,:,p];  other=refdat, method = :FindPhase, psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=false, k_est=k_vecs)
+        rel_corr = get_rel_subpixel_correl(refdat, cropped[:,:,p], k_vecs, corr_psf; upsample=false)
         peak_phases[p, 1] = 0 # peak phase of zero order is always zero
-        peak_phases[p, 2:end] = res_phase
-        peak_strengths[p, 2:end] .= (ideal_strength) ? 1.0 : res_amp
-        # calculate similarly for the zero order
-        central =  mymean .* sum(dat[:,:,p]) ./ sum(mymean)
-        _, _, res_amp = get_subpixel_correl(central;  other=refdat, method = :FindPhase, psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=false, k_est=(0.0,0.0,0.0))
-        peak_strengths[p, 1] = (ideal_strength) ? 1.0 : res_amp # sum(cropped[:,:,p] .* refdat, dims=p) # / prod(size(cropped))
+        peak_phases[p, 2:end] .= angle.(rel_corr)
+        peak_strengths[p, 2:end] .= (ideal_strength) ? 1.0 : abs.(rel_corr)
+
+        peak_strengths[p, 1] = 0.5 # (ideal_strength) ? 1.0 : res_amp # sum(cropped[:,:,p] .* refdat, dims=p) # / prod(size(cropped))
     end
 
     # if (ideal_strength)
@@ -137,6 +133,8 @@ function estimate_parameters(dat, refdat=nothing; pp::PSFParams, k_vecs=nothing,
     otf_indices = ones(Int, length(k_peak_pos))
     otf_phases = zeros(length(k_peak_pos))
     k_peak_pos2 = [d for d in k_peak_pos]
-    spf = SIMParams(pp, sampling, num_photons, bg_photons, k_peak_pos2, peak_phases, peak_strengths, otf_indices, otf_phases);
+    psfsz = size(dat)[1:ndims(dat)-1]
+    mypsf = (isnothing(mypsf)) ? delta(psfsz) : mypsf
+    spf = SIMParams(mypsf, num_photons, bg_photons, k_peak_pos2, peak_phases, peak_strengths, otf_indices, otf_phases);
     return spf
 end

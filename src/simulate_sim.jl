@@ -96,23 +96,17 @@ end
 
 
 """
-    simulate_sim(obj, pp::PSFParams, sp::SIMParams)
+    simulate_sim(obj, sp::SIMParams)
 
 Simulate SIM data.
 Parameters:
 + `obj::Array` : object
-+ `pp::PSFParams` : PSFParams object
 + `sp::SIMParams` : SIMParams object
-+ `sampling::Tuple` : sampling in µm
 + `downsample_factor::Float64` : downsample factor (e.g. 2.0 means half the number of pixels in each dimension)
 """
-function simulate_sim(obj, pp::PSFParams, sp::SIMParams, downsample_factor::Int = 1; mypsf=nothing)
+function simulate_sim(obj, sp::SIMParams, downsample_factor::Int = 1)
     sz = size(obj)
-    if isnothing(mypsf)
-        h = psf(sz, pp; sampling=sp.sampling);  # sampling is 0.5 x 0.5 x 2.0 µm
-    else
-        h = mypsf
-    end
+    h = sp.mypsf
     nd_downsample_factor = ntuple((d) -> (d<=2) ? downsample_factor : 1, length(sz))
     dsz = Int.(round.(sz ./ nd_downsample_factor))
 
@@ -121,7 +115,7 @@ function simulate_sim(obj, pp::PSFParams, sp::SIMParams, downsample_factor::Int 
     sim_data = similar(obj, RT, dsz..., size(sp.peak_phases, 1))
     # Generate SIM illumination pattern
 
-    otfs = get_otfs(complex_arr_type(typeof(obj)), sz, pp, sp, true) # unmodified OTFs as rfts for forward simulation
+    otfs = get_otfs(complex_arr_type(typeof(obj)), sz, sp, true) # unmodified OTFs as rfts for forward simulation
     
     # otf = rfft(ifftshift(h))
     # if (downsample_factor != 1.0)

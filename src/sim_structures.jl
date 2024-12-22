@@ -3,11 +3,10 @@
 
 a (mutable) structure that holds the parameters for the simulation. See details below.
 Constructor:
-SIMParams(psf_params::PSFParams, sampling::NTuple{3, Float64}, n_photons::Float64, n_photons_bg::Float64, k_peak_pos::Array{NTuple{3, Float64}, 1}, peak_phases::Array{Float64,2}, peak_strengths::Array{Float64,2}, otf_indices::Array{Int,1}=[1], otf_phases::Array{Float64,1}=[0.0])  
+SIMParams(mypsf, n_photons::Float64, n_photons_bg::Float64, k_peak_pos::Array{NTuple{3, Float64}, 1}, peak_phases::Array{Float64,2}, peak_strengths::Array{Float64,2}, otf_indices::Array{Int,1}=[1], otf_phases::Array{Float64,1}=[0.0])  
 
 Fields:
-+ `psf_params::PSFParams` : the PSF parameters
-+ `sampling::NTuple{3, Float64}` : the sampling in x, y, and z
++ `mypsf` : the point spread function to simulate with.
 + `n_photons::Float64` : the number of photons
 + `n_photons_bg::Float64` : the number of background photons
 + `k_peak_pos::Array{NTuple{3, Float64}, 1}` : peak-positions in k-space, a vector of 3D tuples, in relation to the Nyquist frequency of the image
@@ -18,8 +17,9 @@ Fields:
 
 """
 mutable struct SIMParams
-    psf_params::PSFParams
-    sampling::NTuple{3, Float64}
+    # psf_params::PSFParams
+    mypsf::AbstractArray
+    # sampling::NTuple{3, Float64}
     n_photons::Float64
     n_photons_bg::Float64
 
@@ -41,19 +41,33 @@ mutable struct SIMParams
     # the relative phases of the OTFs, which are approximated as a multiplication of the PSF with a cos(k_z z + phase)
     otf_phases::Array{Float64, 1}
 
-    function SIMParams(psf_params::PSFParams, sampling::NTuple{3, Float64}, n_photons::Float64, n_photons_bg::Float64, k_peak_pos::Array{NTuple{3, Float64}, 1}, peak_phases::Array{Float64,2}, peak_strengths::Array{Float64,2}, otf_indices::Array{Int,1}=[1], otf_phases::Array{Float64,1}=[0.0])  
-        new(psf_params, sampling, n_photons, n_photons_bg, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases)
+    function SIMParams(mypsf, n_photons::Float64, n_photons_bg::Float64, k_peak_pos::Array{NTuple{3, Float64}, 1}, peak_phases::Array{Float64,2}, peak_strengths::Array{Float64,2}, otf_indices::Array{Int,1}=[1], otf_phases::Array{Float64,1}=[0.0])  
+        new(mypsf, n_photons, n_photons_bg, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases)
     end
-    function SIMParams(sp::SIMParams; sampling=sp.sampling, psf_params=sp.psf_params, n_photons=sp.n_photons, n_photons_bg=sp.n_photons_bg, k_peak_pos=sp.k_peak_pos, peak_phases=sp.peak_phases, peak_strengths=sp.peak_strengths, otf_indices=sp.otf_indices, otf_phases=sp.otf_phases)
-        new(psf_params, sampling, n_photons, n_photons_bg, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases)
+    function SIMParams(sp::SIMParams; mypsf=sp.mypsf, n_photons=sp.n_photons, n_photons_bg=sp.n_photons_bg, k_peak_pos=sp.k_peak_pos, peak_phases=sp.peak_phases, peak_strengths=sp.peak_strengths, otf_indices=sp.otf_indices, otf_phases=sp.otf_phases)
+        new(mypsf, n_photons, n_photons_bg, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases)
     end
 end
 
 function resample_sim_params(sp::SIMParams, resample_factor)
-    resample_factor = ntuple((d) -> (d<=2) ? resample_factor : 1, length(sp.sampling))
-    new_sampling =  sp.sampling .* resample_factor 
+    resample_factor = ntuple((d) -> (d<=2) ? resample_factor : 1, length(sp.k_peak_pos[1]))
+    # new_sampling =  sp.sampling .* resample_factor 
     new_peakpos = [p .* resample_factor for p in sp.k_peak_pos]
-    return SIMParams(sp; sampling=new_sampling, k_peak_pos=new_peakpos)
+    resampled_psf = let
+        if (resample_factor == 1)
+            sp.mypsf
+        else
+            old_size = size(sp.mypsf)
+            new_size = Int.(round.(old_size ./ resample_factor[1:ndims(sp.mypsf)]))
+            new_size_rft = ntuple((d) -> (d>=2) ? new_size[d] : new_size[d]÷2+1, length(new_size))
+            old_rft_center = ntuple((d) -> (d>=2) ? old_size[d]÷2+1 : 1, length(old_size))
+            new_rft_center = ntuple((d) -> (d>=2) ? new_size[d]÷2+1 : 1, length(new_size))
+            # real.(fftshift(ifft(select_region(fft(ifftshift(sp.mypsf)), new_size))))
+            # fftshift(irfft(rifftshift(select_region(rfftshift(rfft(ifftshift(sp.mypsf))), new_size_rft, center=rft_center)), new_size[1]))
+            fftshift(irfft(rifftshift(select_region(rfftshift(rfft(ifftshift(sp.mypsf))), new_size_rft, center=old_rft_center, dst_center=new_rft_center)), new_size[1]))
+        end
+    end
+    return SIMParams(sp; mypsf=resampled_psf, k_peak_pos=new_peakpos)
 end
 
 """

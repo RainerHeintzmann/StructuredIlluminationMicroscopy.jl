@@ -653,9 +653,9 @@ version = "2.13.3+1"
 
 [[deps.FriBidi_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "1ed150b39aebcc805c26b93a8d0122c940f64ce2"
+git-tree-sha1 = "846f7026a9decf3679419122b49f8a1fdb48d2d5"
 uuid = "559328eb-81f9-559d-9380-de523a88c83c"
-version = "1.0.14+0"
+version = "1.0.16+0"
 
 [[deps.Future]]
 deps = ["Random"]
@@ -700,9 +700,9 @@ version = "9.55.0+4"
 
 [[deps.Glib_jll]]
 deps = ["Artifacts", "Gettext_jll", "JLLWrappers", "Libdl", "Libffi_jll", "Libiconv_jll", "Libmount_jll", "PCRE2_jll", "Zlib_jll"]
-git-tree-sha1 = "48b5d4c75b2c9078ead62e345966fa51a25c05ad"
+git-tree-sha1 = "b0036b392358c80d2d2124746c2bf3d48d457938"
 uuid = "7746bdde-850d-59dc-9ae8-88ece973131d"
-version = "2.82.2+1"
+version = "2.82.4+0"
 
 [[deps.Graphics]]
 deps = ["Colors", "LinearAlgebra", "NaNMath"]
@@ -724,9 +724,9 @@ version = "1.12.0"
 
 [[deps.HTTP]]
 deps = ["Base64", "CodecZlib", "ConcurrentUtilities", "Dates", "ExceptionUnwrapping", "Logging", "LoggingExtras", "MbedTLS", "NetworkOptions", "OpenSSL", "PrecompileTools", "Random", "SimpleBufferStream", "Sockets", "URIs", "UUIDs"]
-git-tree-sha1 = "627fcacdb7cb51dc67f557e1598cdffe4dda386d"
+git-tree-sha1 = "c67b33b085f6e2faf8bf79a61962e7339a81129c"
 uuid = "cd3eb016-35fb-5094-929b-558a96fad6f3"
-version = "1.10.14"
+version = "1.10.15"
 
 [[deps.HarfBuzz_jll]]
 deps = ["Artifacts", "Cairo_jll", "Fontconfig_jll", "FreeType2_jll", "Glib_jll", "Graphite2_jll", "JLLWrappers", "Libdl", "Libffi_jll"]
@@ -1023,9 +1023,9 @@ version = "0.1.5"
 
 [[deps.JpegTurbo_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "25ee0be4d43d0269027024d75a24c24d6c6e590c"
+git-tree-sha1 = "ef10afc9f4b942bcd75f4c3bc9d9e8d802944c23"
 uuid = "aacddb02-875f-59d6-b918-886e6ef4fbf8"
-version = "3.0.4+0"
+version = "3.1.0+0"
 
 [[deps.JuliaNVTXCallbacks_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
@@ -1057,9 +1057,9 @@ version = "0.9.31"
 
 [[deps.LERC_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "36bdbc52f13a7d1dcb0f3cd694e01677a515655b"
+git-tree-sha1 = "4ec1e8fac04150b570e315baaa68950e368a803d"
 uuid = "88015f11-f218-50d7-93a8-a6af411a945d"
-version = "4.0.0+0"
+version = "4.0.0+1"
 
 [[deps.LLVM]]
 deps = ["CEnum", "LLVMExtra_jll", "Libdl", "Preferences", "Printf", "Unicode"]
@@ -1169,9 +1169,9 @@ version = "1.11.0"
 
 [[deps.Libffi_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "0b4a5d71f3e5200a7dff793393e09dfc2d874290"
+git-tree-sha1 = "27ecae93dd25ee0909666e6835051dd684cc035e"
 uuid = "e9f186c6-92d2-5b65-8a66-fee21dc1b490"
-version = "3.2.2+1"
+version = "3.2.2+2"
 
 [[deps.Libgcrypt_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Libgpg_error_jll"]
@@ -1181,9 +1181,9 @@ version = "1.11.0+0"
 
 [[deps.Libgpg_error_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "c6ce1e19f3aec9b59186bdf06cdf3c4fc5f5f3e6"
+git-tree-sha1 = "a7f43994b47130e4f491c3b2dbe78fe9e2aed2b3"
 uuid = "7add5ba3-2f88-524e-9cd5-f83b8a55f7b8"
-version = "1.50.0+0"
+version = "1.51.0+0"
 
 [[deps.Libiconv_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
@@ -1365,7 +1365,7 @@ version = "1.2.1"
 deps = ["LinearAlgebra", "OffsetArrays", "PaddedViews", "Random", "Statistics"]
 path = "../../NDTools.jl"
 uuid = "98581153-e998-4eef-8d0d-5ec2c052313d"
-version = "0.7.0"
+version = "0.7.1"
 
 [[deps.NFFT]]
 deps = ["AbstractNFFTs", "BasicInterpolators", "Distributed", "FFTW", "FLoops", "LinearAlgebra", "PrecompileTools", "Printf", "Random", "Reexport", "SparseArrays", "SpecialFunctions"]
@@ -1430,9 +1430,9 @@ uuid = "81d43f40-5267-43b7-ae1c-8b967f377efa"
 version = "0.3.3"
 
 [[deps.OffsetArrays]]
-git-tree-sha1 = "39d000d9c33706b8364817d8894fae1548f40295"
+git-tree-sha1 = "5e1897147d1ff8d98883cda2be2187dcf57d8f0c"
 uuid = "6fe1bfb0-de20-5000-8ca7-80f57d26f881"
-version = "1.14.2"
+version = "1.15.0"
 weakdeps = ["Adapt"]
 
     [deps.OffsetArrays.extensions]
@@ -1520,9 +1520,9 @@ version = "0.5.12"
 
 [[deps.Pango_jll]]
 deps = ["Artifacts", "Cairo_jll", "Fontconfig_jll", "FreeType2_jll", "FriBidi_jll", "Glib_jll", "HarfBuzz_jll", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "e127b609fb9ecba6f201ba7ab753d5a605d53801"
+git-tree-sha1 = "ed6834e95bd326c52d5675b4181386dfbe885afb"
 uuid = "36c8627f-9965-5494-a995-c6b170f724f3"
-version = "1.54.1+0"
+version = "1.55.5+0"
 
 [[deps.Parameters]]
 deps = ["OrderedCollections", "UnPack"]
@@ -1559,15 +1559,15 @@ version = "0.3.3"
 
 [[deps.Pluto]]
 deps = ["Base64", "Configurations", "Dates", "Downloads", "ExpressionExplorer", "FileWatching", "FuzzyCompletions", "HTTP", "HypertextLiteral", "InteractiveUtils", "Logging", "LoggingExtras", "MIMEs", "Malt", "Markdown", "MsgPack", "Pkg", "PlutoDependencyExplorer", "PrecompileSignatures", "PrecompileTools", "REPL", "RegistryInstances", "RelocatableFolders", "Scratch", "Sockets", "TOML", "Tables", "URIs", "UUIDs"]
-git-tree-sha1 = "3d97d067ea3d04f51821ac86b0d04024fe6e4df8"
+git-tree-sha1 = "b5509a2e4d4c189da505b780e3f447d1e38a0350"
 uuid = "c3e4b0f8-55cb-11ea-2926-15256bba5781"
-version = "0.20.3"
+version = "0.20.4"
 
 [[deps.PlutoDependencyExplorer]]
 deps = ["ExpressionExplorer", "InteractiveUtils", "Markdown"]
-git-tree-sha1 = "592470bdf383cd34e88a21bbd7f1f7ffc52a21c6"
+git-tree-sha1 = "e0864c15334d2c4bac8137ce3359f1174565e719"
 uuid = "72656b73-756c-7461-726b-72656b6b696b"
-version = "1.1.0"
+version = "1.2.0"
 
 [[deps.PlutoUI]]
 deps = ["AbstractPlutoDingetjes", "Base64", "ColorTypes", "Dates", "FixedPointNumbers", "Hyperscript", "HypertextLiteral", "IOCapture", "InteractiveUtils", "JSON", "Logging", "MIMEs", "Markdown", "Random", "Reexport", "URIs", "UUIDs"]
@@ -1927,9 +1927,9 @@ weakdeps = ["OffsetArrays", "StaticArrays"]
 
 [[deps.StaticArrays]]
 deps = ["LinearAlgebra", "PrecompileTools", "Random", "StaticArraysCore"]
-git-tree-sha1 = "777657803913ffc7e8cc20f0fd04b634f871af8f"
+git-tree-sha1 = "7c01731da8ab6d3094c4d44c9057b00932459255"
 uuid = "90137ffa-7385-5640-81b9-e52037218182"
-version = "1.9.8"
+version = "1.9.9"
 weakdeps = ["ChainRulesCore", "Statistics"]
 
     [deps.StaticArrays.extensions]
@@ -1989,7 +1989,7 @@ weakdeps = ["Adapt", "GPUArraysCore", "SparseArrays", "StaticArrays"]
     StructArraysStaticArraysExt = "StaticArrays"
 
 [[deps.StructuredIlluminationMicroscopy]]
-deps = ["FFTW", "FindShift", "FourierTools", "Images", "IndexFunArrays", "LinearAlgebra", "NDTools", "Noise", "PointSpreadFunctions", "SeparableFunctions", "Statistics"]
+deps = ["FFTW", "FindShift", "FourierTools", "Images", "IndexFunArrays", "LinearAlgebra", "NDTools", "Noise", "SeparableFunctions", "Statistics"]
 path = ".."
 uuid = "a7ea9a99-8dd4-4c38-9d41-c34fb0fe62c4"
 version = "0.1.0"

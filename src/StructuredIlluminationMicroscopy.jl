@@ -22,7 +22,8 @@ sampling = (0.06, 0.06, 0.1)  # 100 nm x 100 nm x 200 nm
 num_directions = 5  ; num_images =  5*num_directions; num_orders = 3
 k_peak_pos, peak_phases, peak_strengths = generate_peaks(num_images, num_directions, num_orders, 0.48 / (num_orders-1))
 num_photons = 0.0
-sp = SIMParams(pp, sampling, num_photons, 100.0, k_peak_pos, peak_phases, peak_strengths)
+mypsf = psf(pp, sampling=sampling)
+sp = SIMParams(mypsf, num_photons, 100.0, k_peak_pos, peak_phases, peak_strengths)
 
 obj = Float32.(testimage("resolution_test_512"))
 obj[257, 257] = 2.0
@@ -68,7 +69,6 @@ module StructuredIlluminationMicroscopy
 
     using FFTW
     using IndexFunArrays # for rr and delta
-    using PointSpreadFunctions # to calculate PSFs
     using LinearAlgebra # for dot
     using NDTools  # select_region!
     using Noise # for poisson simulation
