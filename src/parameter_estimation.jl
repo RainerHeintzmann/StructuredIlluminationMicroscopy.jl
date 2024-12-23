@@ -102,13 +102,13 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
 
     if isnothing(k_vecs)
         k_vecs, _, _ = get_subpixel_correl(peak_ref; other=refdat, psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=true)
+        println("You can call this function with the k_vecs parameter $(k_vecs) to speed up the estimation.")
     else
         k_vecs, _, _ = get_subpixel_correl(peak_ref; other=refdat, k_est = k_vecs,  psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=false)
     end
     # find_shift(dat[:,:,1], dat[:,:,1])
     # k_vec, phase, amp = get_subpixel_correl(cropped;  psf=psf_cropped, upsample=upsample, k_est=(509, -308))
 
-    println("You can call this function with the k_vecs parameter $(k_vecs) to speed up the estimation.")
     to_tuple = (t) -> (((2 .* t[1:2] ./ (size(dat)[1:2])...,))..., 0.0)
     k_peak_pos = [(0.0, 0.0, 0.0), to_tuple.(k_vecs)...]
     # k_peak_pos = [(0.0, 0.0, 0.0), (2 .* k_vecs ./ size(dat))...]
@@ -119,7 +119,7 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
         rel_corr = get_rel_subpixel_correl(refdat, cropped[:,:,p], k_vecs, corr_psf; upsample=false)
         peak_phases[p, 1] = 0 # peak phase of zero order is always zero
         peak_phases[p, 2:end] .= angle.(rel_corr)
-        peak_strengths[p, 2:end] .= (ideal_strength) ? 1.0 : abs.(rel_corr)
+        peak_strengths[p, 2:end] .= (ideal_strength) ? 0.5 : abs.(rel_corr)
 
         peak_strengths[p, 1] = 0.5 # (ideal_strength) ? 1.0 : res_amp # sum(cropped[:,:,p] .* refdat, dims=p) # / prod(size(cropped))
     end
