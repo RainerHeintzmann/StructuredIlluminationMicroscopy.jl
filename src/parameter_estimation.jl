@@ -1,17 +1,16 @@
 
 """
-    estimate_parameters(dat, mypsf=nothing, refdat=nothing; mypsf=nothing, subtract_mean=true, prefilter_correl=true, k_vecs=nothing)
+    estimate_parameters(dat, mypsf=nothing, refdat=nothing; mypsf=nothing, subtract_mean=true,  k_vecs=nothing)
 
 Estimate the parameters for a SIM image from the experimatal data. This function is used to estimate the parameters for the SIM image from the experimental data. The function uses the experimental data to estimate the parameters for the SIM image.
 The function returns the estimated parameters for the SIM image.
 
 # Arguments
 - `dat::Array`: The experimental data.
-- `mypsf::Array`: Optional parameter specifying the PSF to use for prefiltering.
-- `refdat::Array`: The reference data.
+- `mypsf::Array`: Optional parameter specifying the PSF to use for prefiltering. If `nothing` is provided, the function will assuma delta-psf.
+- `refdat::Array`: The reference data. Typicall the corresponding widefield (zero-order) image.
 - `subtract_mean::Bool`: Subtract the mean.
 - `k_vecs::Array`: The k vectors.
-- `prefilter_correl::Bool`: If true, prefilter the correlation using the PSF. Default is true. 0.05 may be a useful value.
 - `subtract_mean::Bool`: If true, subtract the mean. Default is true.
 - `suppress_sigma`: The width of the center to suppress if > 0. As a ratio of the size. Default is 0.
 - 'num_directions': Number of directions. Default is 0 which means each frame contains all directions. 
@@ -19,7 +18,7 @@ The function returns the estimated parameters for the SIM image.
 
 """
 function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
-                            prefilter_correl=true, subtract_mean=true, upsample=false, suppress_sigma=0.0, 
+                            subtract_mean=true, upsample=false, suppress_sigma=0.0, 
                             num_directions=0, ideal_strength=true)
     if num_directions > 0
         num_phases = size(dat, ndims(dat)) ÷ num_directions;
@@ -34,7 +33,6 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
                 k_vec = [k_vecs[d]]
             end
             spf_sub = estimate_parameters(sub_data, mypsf, refdat; k_vecs=k_vec,  
-                                            prefilter_correl=prefilter_correl, 
                                             subtract_mean=subtract_mean, suppress_sigma=suppress_sigma, 
                                             num_directions=0, ideal_strength=ideal_strength)
             if (d == 1)
@@ -78,16 +76,6 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
 
     # select the PSF to use for prefiltering
     corr_psf = mypsf ./ sum(mypsf) # let
-    #     if (prefilter_correl)
-    #         if isnothing(mypsf)
-    #             psf(cs, pp; sampling=sampling)
-    #         else
-    #             mypsf
-    #         end
-    #     else
-    #         nothing
-    #     end
-    # end
 
     # modify the PSF to suppress the low frequencies, if wanted
     if !isnothing(corr_psf) && (suppress_sigma > 0)
