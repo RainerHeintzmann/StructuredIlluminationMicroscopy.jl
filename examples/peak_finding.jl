@@ -1,5 +1,5 @@
 # some test to determine which peak-finding algorithm is best suited for SIMParams
-using StructuredIlluminationMicroscopy.IndexFunArrays
+# using StructuredIlluminationMicroscopy.IndexFunArrays
 using NDTools
 using StructuredIlluminationMicroscopy.SeparableFunctions
 
@@ -67,38 +67,57 @@ function subpixel_kg(data, k0; dim=1)
     kgp = k0[dim] + (sz[dim]-1)*(angle(sum2)-angle(sum1))/(2pi)    #*sz[1]/2π
     return kgp
 end
+π
+"""
+    subpixel_kg(data, k0)
 
+Estimate the subpixel position of a peak in a multidimensional array.
+Parameters:
+    data: array of the data
+    k0: integer Fourierspace position of the peak
+"""
 function subpixel_kg(data, k0)
     sz = size(data)
+    # generate an object that looks like an array representing an exponential shifting operation
+    # Yet the separability of such an exponential is exploitet to make to code faster.
     my_nd_exp = exp_ikx_sep(sz, shift_by=k0)
     kg = zeros(length(k0))
     for dim=1:ndims(data)
+        # list all projection dimensions
         alldims = ntuple(d -> (d<dim) ? d : d+1, ndims(data)-1)
+        # project over all dimensions except the current one
         proj = sum(my_nd_exp .* data, dims=alldims)
-        win = window_hanning((sz[dim],).-1) # needs a tuple as size input
+        # create a one-dimensional Hanning window over N-1 points
+        win = (1 .+ cos.(range(-pi, stop=pi, length=sz[dim]-1))) ./ 2
+        # win = window_hanning((sz[dim],).-1) # needs a tuple as size input
         sum1 = sum(proj[1:end-1] .* win)
         sum2 = sum(proj[2:end] .* win)
         kg[dim] = k0[dim] + (sz[dim]-1)*(angle(sum2)-angle(sum1))/(2pi)    #*sz[1]/2π
     end
     return kg
 end
+### 2D Example
+sz = (512,512)
+# kg = (17.767, 19.234)
+kg = (110.267, 102.760)
+signal = cos.(2pi * kg[1]/sz[1] .* xx(sz)) .* cos.(2pi * kg[2]/sz[2] .* yy(sz))
+# @vv ft(signal)
+k0 = round.(kg)
+# k0 = (110, 100)
+# win = window_hanning(sz.-1)
+kg = subpixel_kg(signal, k0)
 
+noisy = signal .+ 0.1 * randn(sz...)
+kgn = subpixel_kg(noisy, k0)
+
+# 1D example
 kg = 100.267 
 sz = (512,)
 signal = exp.(2π * 1im * kg/sz[1] .* xx(sz))
 k0 = round(kg)
 # kgp = subpixel_kg(signal, k0, win, dim=1, k_off=0)
-kgp = subpixel_kg(signal, k0, win, dim=1)
+kgp = subpixel_kg(signal, k0)
 
-sz = (512,512)
-# kg = (17.767, 19.234)
-kg = (110.267, 102.760)
-signal = cos.(2π * kg[1]/sz[1] .* xx(sz)) .* cos.(2π * kg[2]/sz[2] .* yy(sz))
-# @vv ft(signal)
-k0 = round.(kg)
-# k0 = (110, 100)
-win = window_hanning(sz.-1)
-kg = subpixel_kg(signal, k0)
 
-kg = subpixel_kg(signal, k0, dim=1)
-kgp = subpixel_kg(signal, k0, dim=2)
+# kg = subpixel_kg(signal, k0, dim=1)
+# kgp = subpixel_kg(signal, k0, dim=2)
