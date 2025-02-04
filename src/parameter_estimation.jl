@@ -6,7 +6,7 @@ Estimate the parameters for a SIM image from the experimatal data. This function
 The function returns the estimated parameters for the SIM image.
 
 # Arguments
-- `dat::Array`: The experimental data.
+- `dat::Array`: The experimental data. Should be 2-dimensional plus the 3rd dimension for recordings with different phase and/or direction.
 - `mypsf::Array`: Optional parameter specifying the PSF to use for prefiltering. If `nothing` is provided, the function will assuma delta-psf.
 - `refdat::Array`: The reference data. Typicall the corresponding widefield (zero-order) image.
 - `subtract_mean::Bool`: Subtract the mean.

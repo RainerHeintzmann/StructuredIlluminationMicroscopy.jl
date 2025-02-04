@@ -84,7 +84,9 @@ module StructuredIlluminationMicroscopy
     export rfft_crop, rfft_size, rfftshift, rifftshift, rfftshift!, rifftshift!, get_rft_center
     export swap_vals!, fftshift!, IntType, force_integer_pixels, estimate_prep_mem, print_mem_usage
     export estimate_parameters
+    export preprocess_sim
 
+    include("preprocess.jl")    
     include("sim_structures.jl")
     include("utils.jl")
     include("simulate_sim.jl")
