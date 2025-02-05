@@ -15,32 +15,38 @@ The function returns the estimated parameters for the SIM image.
 - `suppress_sigma`: The width of the center to suppress if > 0. As a ratio of the size. Default is 0.
 - 'num_directions': Number of directions. Default is 0 which means each frame contains all directions. 
                     If provided, it is assumed that the trailing dimension is subdivided into directions and phases per direction.
+- 'ideal_strength': If true, the strength of the peaks is set to 1. Default is true.
+- 'imply_higher_orders': If not zero, this specifies the number of higher orders which are implied from the first order. Default is 0.
 
 """
 function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
                             subtract_mean=true, upsample=false, suppress_sigma=0.0, 
-                            num_directions=0, ideal_strength=true)
+                            num_directions=0, ideal_strength=true, imply_higher_orders=0)
     if num_directions > 0
         num_phases = size(dat, ndims(dat)) ÷ num_directions;
         if num_phases * num_directions != size(dat, ndims(dat))
             error("The number of phases times the number of directions must equal the number of frames.")
         end
         spf = nothing
+        for_print = "("
         for d in 1:num_directions
             sub_data = slice(dat, ndims(dat), (d-1)*num_phases+1:d*num_phases)
             k_vec = nothing
             if !isnothing(k_vecs)
-                k_vec = [k_vecs[d]]
+                k_vec = k_vecs[d]
+                if isa(k_vec[1], Number)
+                    k_vec = [k_vec,]
+                end
             end
             spf_sub = estimate_parameters(sub_data, mypsf, refdat; k_vecs=k_vec,  
                                             subtract_mean=subtract_mean, suppress_sigma=suppress_sigma, 
-                                            num_directions=0, ideal_strength=ideal_strength)
+                                            num_directions=0, ideal_strength=ideal_strength, imply_higher_orders=imply_higher_orders)
             if (d == 1)
                 spf = spf_sub
             else
                 num_orders = size(spf_sub.k_peak_pos, 1)
-                spf.otf_indices = vcat(spf.otf_indices, 1)
-                spf.otf_phases = vcat(spf.otf_phases, 1)
+                spf.otf_indices = vcat(spf.otf_indices, ones(Int, num_orders-1))
+                spf.otf_phases = vcat(spf.otf_phases, ones(num_orders-1))
                 spf.k_peak_pos = vcat(spf.k_peak_pos, spf_sub.k_peak_pos[2:end])
                 spf.peak_phases = hcat(spf.peak_phases, zeros(size(spf.peak_phases, 1), num_orders-1))
                 spf.peak_phases = vcat(spf.peak_phases, zeros(num_phases, size(spf.peak_phases,2)))
@@ -51,8 +57,20 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
                 spf.peak_strengths[end-num_phases+1:end, end-(num_orders-2):end] = spf_sub.peak_strengths[:,2:end]
                 spf.peak_strengths[end-num_phases+1:end, 1] .= spf_sub.peak_strengths[:,1]
             end
+            if (d>1)
+                for_print *= ","
+            end
+
+            peaks = kvecs_to_peak(spf_sub.k_peak_pos[2:end], size(dat))
+            if (imply_higher_orders != 0)
+                for_print *= " $(peaks[1])"
+            else
+                for_print *= " $(peaks)"
+            end
         end
         spf.peak_strengths ./= maximum(spf.peak_strengths)
+        println("Put the following line in the next call to estimate_parameters: ")
+        println("k_vecs =" * for_print * ")")
         return spf
     end
     # psf = abs2.(ift(rr(size(dat)[1:2]) .< 0.25*size(dat,1)))
@@ -94,20 +112,34 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
     else
         k_vecs, _, _ = get_subpixel_correl(peak_ref; other=refdat, k_est = k_vecs,  psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=false)
     end
+
     # find_shift(dat[:,:,1], dat[:,:,1])
     # k_vec, phase, amp = get_subpixel_correl(cropped;  psf=psf_cropped, upsample=upsample, k_est=(509, -308))
 
-    to_tuple = (t) -> (((2 .* t[1:2] ./ (size(dat)[1:2])...,))..., 0.0)
-    k_peak_pos = [(0.0, 0.0, 0.0), to_tuple.(k_vecs)...]
+    k_peak_pos = peak_to_kvecs(k_vecs, size(dat))
+    # to_tuple = (t) -> (((2 .* t[1:2] ./ (size(dat)[1:2])...,))..., 0.0)
+    # k_peak_pos = [(0.0, 0.0, 0.0), to_tuple.(k_vecs)...]
     # k_peak_pos = [(0.0, 0.0, 0.0), (2 .* k_vecs ./ size(dat))...]
+    if (imply_higher_orders > 0)
+        base_vec = k_peak_pos[2]
+        k_peak_pos = [k_peak_pos[1:2]...]
+        for h in 1:imply_higher_orders
+            k_peak_pos = vcat(k_peak_pos, base_vec .* (h+1))
+        end
+    end
 
     peak_phases = zeros(size(dat, 3), length(k_peak_pos))
     peak_strengths = zeros(size(dat, 3), length(k_peak_pos))
     for p in axes(cropped, ndims(cropped)) # phases
         rel_corr = get_rel_subpixel_correl(refdat, cropped[:,:,p], k_vecs, corr_psf; upsample=false)
         peak_phases[p, 1] = 0 # peak phase of zero order is always zero
-        peak_phases[p, 2:end] .= angle.(rel_corr)
+        peak_phases[p, 2:2+length(rel_corr)-1] .= angle.(rel_corr)
         peak_strengths[p, 2:end] .= (ideal_strength) ? 0.5 : abs.(rel_corr)
+        if (imply_higher_orders > 0)
+            for h in 1:imply_higher_orders
+                peak_phases[p, h+2] = angle.(rel_corr[1]) * (h+1)
+            end
+        end
 
         peak_strengths[p, 1] = 0.5 # (ideal_strength) ? 1.0 : res_amp # sum(cropped[:,:,p] .* refdat, dims=p) # / prod(size(cropped))
     end
@@ -126,3 +158,33 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
     spf = SIMParams(mypsf, num_photons, bg_photons, k_peak_pos2, peak_phases, peak_strengths, otf_indices, otf_phases);
     return spf
 end
+
+
+"""
+    peak_to_kvecs(peak_pos; sz)
+
+Convert the peak positions to k vectors.
+
+# Arguments
+- `peak_pos::Array`: The peak positions.
+- `sz::Tuple`: The size of the image.
+"""
+function peak_to_kvecs(peak_pos, sz)
+    to_tuple = (t) -> (((2 .* t[1:2] ./ (sz[1:2])...,))..., 0.0)
+    return [(0.0, 0.0, 0.0), to_tuple.(peak_pos)...]
+end
+
+"""
+    kvecs_to_peak(k_vecs; sz)
+
+Convert the k vectors to peak positions.
+
+# Arguments
+- `k_vecs::Array`: The k vectors.
+- `sz::Tuple`: The size of the image.
+"""
+function kvecs_to_peak(k_vecs, sz)
+    to_peak = (t) -> round.(Int, (((t[1:2] .* (sz[1:2])...,) ./ 2)..., 0.0))
+    return to_peak.(k_vecs)
+end
+
