@@ -21,7 +21,7 @@ The function returns the estimated parameters for the SIM image.
 """
 function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
                             subtract_mean=true, upsample=false, suppress_sigma=0.0, 
-                            num_directions=0, ideal_strength=true, imply_higher_orders=0)
+                            num_directions=0, ideal_strength=true, imply_higher_orders=0, amp_magnitudes=nothing)
     if num_directions > 0
         num_phases = size(dat, ndims(dat)) ÷ num_directions;
         if num_phases * num_directions != size(dat, ndims(dat))
@@ -40,7 +40,7 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
             end
             spf_sub = estimate_parameters(sub_data, mypsf, refdat; k_vecs=k_vec,  
                                             subtract_mean=subtract_mean, suppress_sigma=suppress_sigma, 
-                                            num_directions=0, ideal_strength=ideal_strength, imply_higher_orders=imply_higher_orders)
+                                            num_directions=0, ideal_strength=ideal_strength, imply_higher_orders=imply_higher_orders, amp_magnitudes=amp_magnitudes)
             if (d == 1)
                 spf = spf_sub
             else
@@ -134,7 +134,8 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
         rel_corr = get_rel_subpixel_correl(refdat, cropped[:,:,p], k_vecs, corr_psf; upsample=false)
         peak_phases[p, 1] = 0 # peak phase of zero order is always zero
         peak_phases[p, 2:2+length(rel_corr)-1] .= angle.(rel_corr)
-        peak_strengths[p, 2:end] .= (ideal_strength) ? 0.5 : abs.(rel_corr)
+        ideal_magnitudes = isnothing(amp_magnitudes) ? 0.5  : order_strengths_from_amp(amp_magnitudes)[2:end]
+        peak_strengths[p, 2:end] .= (ideal_strength) ? ideal_magnitudes : abs.(rel_corr)
         if (imply_higher_orders > 0)
             for h in 1:imply_higher_orders
                 peak_phases[p, h+2] = angle.(rel_corr[1]) * (h+1)
@@ -159,6 +160,19 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
     return spf
 end
 
+"""
+    order_strengths_from_amp(amp_magnitudes)
+
+calculates the order_strengths from the magnitudes of the amplitudes using FFTs.
+
+Parameters:
+- `amp_magnitudes`: Input magnitudes of the amplitudes at the pupil plane 
+"""
+function order_strengths_from_amp(amp_magnitudes)
+    result_sz = (2*length(amp_magnitudes)-1,)
+    res = abs.(fft(abs2.(ifft(ifftshift(select_region(amp_magnitudes,result_sz))))))
+    return res[1:length(res)÷2+1]./maximum(res)
+end
 
 """
     peak_to_kvecs(peak_pos; sz)
