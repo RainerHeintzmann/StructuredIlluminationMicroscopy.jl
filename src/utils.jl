@@ -346,3 +346,8 @@ function print_mem_usage(sim_data, prep)
     println("sim_data: $(dat_mem) Gb") # / 1024 /1024 # 42 Mb, or 33 Mb with reuse of memory    
     println("Total mem: $(dat_mem + est_mem) Gb") # / 1024 /1024 # 42 Mb, or 33 Mb with reuse of memory    
 end
+
+function squeeze_dim(arr, dim)
+    ids = ntuple((d) -> (d==dim) ? 1 : Colon(), ndims(arr))
+    return @view arr[ids...]
+end

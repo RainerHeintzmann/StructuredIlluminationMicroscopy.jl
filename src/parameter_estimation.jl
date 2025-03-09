@@ -30,7 +30,7 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
         spf = nothing
         for_print = "("
         for d in 1:num_directions
-            sub_data = slice(dat, ndims(dat), (d-1)*num_phases+1:d*num_phases)
+            sub_data = slice(dat, ndims(dat), (d-1)*num_phases+1:d*num_phases) # pick all phases of one direction
             k_vec = nothing
             if !isnothing(k_vecs)
                 k_vec = k_vecs[d]
@@ -46,7 +46,7 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
             else
                 num_orders = size(spf_sub.k_peak_pos, 1)
                 spf.otf_indices = vcat(spf.otf_indices, ones(Int, num_orders-1))
-                spf.otf_phases = vcat(spf.otf_phases, ones(num_orders-1))
+                spf.otf_phases = vcat(spf.otf_phases, zeros(num_orders-1))
                 spf.k_peak_pos = vcat(spf.k_peak_pos, spf_sub.k_peak_pos[2:end])
                 spf.peak_phases = hcat(spf.peak_phases, zeros(size(spf.peak_phases, 1), num_orders-1))
                 spf.peak_phases = vcat(spf.peak_phases, zeros(num_phases, size(spf.peak_phases,2)))
@@ -104,7 +104,8 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
 
     # use the first provided image as the one to correlate with the reference.
     # The prefiltering is done in get_subpixel_correl.
-    peak_ref = @view cropped[:,:,1]
+    refdat = squeeze_dim(refdat, ndims(refdat))
+    peak_ref = squeeze_dim(slice(cropped, ndims(cropped), 1), ndims(cropped)) # [:,:,1]
 
     if isnothing(k_vecs)
         k_vecs, _, _ = get_subpixel_correl(peak_ref; other=refdat, psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=true)
@@ -128,10 +129,12 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
         end
     end
 
-    peak_phases = zeros(size(dat, 3), length(k_peak_pos))
-    peak_strengths = zeros(size(dat, 3), length(k_peak_pos))
+    peak_phases = zeros(size(dat, ndims(dat)), length(k_peak_pos))
+    peak_strengths = zeros(size(dat, ndims(dat)), length(k_peak_pos))
     for p in axes(cropped, ndims(cropped)) # phases
-        rel_corr = get_rel_subpixel_correl(refdat, cropped[:,:,p], k_vecs, corr_psf; upsample=false)
+        # @show p
+        cropped_slice = squeeze_dim(slice(cropped, ndims(cropped), p), ndims(cropped))
+        rel_corr = get_rel_subpixel_correl(refdat, cropped_slice, k_vecs, corr_psf; upsample=false)
         peak_phases[p, 1] = 0 # peak phase of zero order is always zero
         peak_phases[p, 2:2+length(rel_corr)-1] .= angle.(rel_corr)
         ideal_magnitudes = isnothing(amp_magnitudes) ? 0.5  : order_strengths_from_amp(amp_magnitudes)[2:end]
