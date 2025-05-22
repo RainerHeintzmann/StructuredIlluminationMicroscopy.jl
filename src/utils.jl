@@ -254,8 +254,8 @@ Parameters:
 
 """
 function modify_otf(otf, sigma=0.1, contrast=1.0)
-    RT = real(eltype(otf))
-    return otf .* real_arr_type(typeof(otf), Val(2))(one(RT) .- RT(contrast) .* exp.(-rr2(RT, size(otf)[1:2], scale=ScaFT)/(2*sigma^2)))
+    return otf .* gaussian_notch(otf, contrast, sigma)
+    # return otf .* real_arr_type(typeof(otf), Val(2))(one(RT) .- RT(contrast) .* exp.(-rr2(RT, size(otf)[1:2], scale=ScaFT)/(2*sigma^2)))
 end
 
 

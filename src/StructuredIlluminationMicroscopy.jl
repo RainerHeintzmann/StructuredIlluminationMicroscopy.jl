@@ -85,6 +85,7 @@ module StructuredIlluminationMicroscopy
     export swap_vals!, fftshift!, IntType, force_integer_pixels, estimate_prep_mem, print_mem_usage
     export estimate_parameters
     export preprocess_sim
+    export psf_notch, gaussian_notch
 
     include("preprocess.jl")    
     include("sim_structures.jl")
@@ -92,5 +93,6 @@ module StructuredIlluminationMicroscopy
     include("simulate_sim.jl")
     include("classical_sim.jl")
     include("parameter_estimation.jl")
+    include("notch_filters.jl")
 
 end

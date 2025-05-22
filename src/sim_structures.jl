@@ -92,6 +92,7 @@ Fields:
 
 """
 mutable struct ReconParams
+    notch::Union{AbstractArray{<:Real}, Nothing}
     suppression_sigma::Float64
     suppression_strength::Float64
     upsample_factor::Int
@@ -107,6 +108,7 @@ mutable struct ReconParams
     slice_by_slice::Bool
 
     function ReconParams(; # constructor with default values
+        notch = nothing,
         suppression_sigma = 0.2,
         suppression_strength = 1.0,
         upsample_factor::Int = 2,
@@ -119,7 +121,7 @@ mutable struct ReconParams
         double_use=true,
         preshift_otfs=true,
         use_hgoal=true, slice_by_slice=false)
-        new(Float64(suppression_sigma), 
+        new(notch, Float64(suppression_sigma), 
             Float64(suppression_strength), 
             upsample_factor, 
             reference_slice,
