@@ -1,6 +1,8 @@
 
 """
-    estimate_parameters(dat, mypsf=nothing, refdat=nothing; mypsf=nothing, subtract_mean=true,  k_vecs=nothing)
+    function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
+                            subtract_mean=true, upsample=false, suppress_sigma=0.0, 
+                            num_directions=0, ideal_strength=true, imply_higher_orders=0, amp_magnitudes=nothing)
 
 Estimate the parameters for a SIM image from the experimatal data. This function is used to estimate the parameters for the SIM image from the experimental data. The function uses the experimental data to estimate the parameters for the SIM image.
 The function returns the estimated parameters for the SIM image.
@@ -13,10 +15,10 @@ The function returns the estimated parameters for the SIM image.
 - `k_vecs::Array`: The k vectors.
 - `subtract_mean::Bool`: If true, subtract the mean. Default is true.
 - `suppress_sigma`: The width of the center to suppress if > 0. As a ratio of the size. Default is 0.
-- 'num_directions': Number of directions. Default is 0 which means each frame contains all directions. 
+- `num_directions`: Number of directions. Default is 0 which means each frame contains all directions. 
                     If provided, it is assumed that the trailing dimension is subdivided into directions and phases per direction.
-- 'ideal_strength': If true, the strength of the peaks is set to 1. Default is true.
-- 'imply_higher_orders': If not zero, this specifies the number of higher orders which are implied from the first order. Default is 0.
+- `ideal_strength`: If true, the strength of the peaks is set to 1. Default is true.
+- `imply_higher_orders`: If not zero, this specifies the number of higher orders which are implied from the first order. Default is 0.
 
 """
 function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,

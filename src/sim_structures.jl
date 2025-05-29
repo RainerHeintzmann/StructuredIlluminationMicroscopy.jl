@@ -106,6 +106,7 @@ mutable struct ReconParams
     preshift_otfs::Bool
     use_hgoal::Bool
     slice_by_slice::Bool
+    do_deconvolve::Bool
 
     function ReconParams(; # constructor with default values
         notch = nothing,
@@ -146,6 +147,7 @@ Fields:
 + `pixelshifts::Vector{NTuple{3, Int}}` : the pixel shifts
 + `slice_by_slice::Bool` : slice by slice reconstruction
 + `upsample_factor::Int` : the upsampling factor
++ `rec_otf`: an OTF describing the forward model of the unmixed and joined data. Can be used for deconvolution
 + `final_filter::CAT` : the final filter
 + `subpixel_shifters::Vector{Any}` : the subpixel shifters
 + `ftorder::CAT` : the Fourier transform order
@@ -161,9 +163,11 @@ mutable struct PreparationParams{RAT, CAT} # , CT, D, RT, TA <: AbstractArray{CT
     pinv_weight_mat::AbstractMatrix
     otfs::Vector{CAT}
     pixelshifts::Vector{NTuple{3, Int}}
+
     slice_by_slice::Bool
     upsample_factor::Int
     final_filter::CAT
+    rec_otf::Union{CAT, Nothing}
     subpixel_shifters::Vector{Any}
 
     ftorder::CAT
@@ -181,9 +185,12 @@ mutable struct PreparationParams{RAT, CAT} # , CT, D, RT, TA <: AbstractArray{CT
         rat_dummy = RAT(undef, ntuple((d)->0, ndims(RAT)))
         plan_dummy = plan_fft!(cat_dummy)
         new{RAT, CAT}(pinv_dummy, [cat_dummy,], [(0,0,0),],
-                      false, 2,
-                      cat_dummy, [],
-                      cat_dummy, cat_dummy, rat_dummy, cat_dummy, cat_dummy, plan_dummy, plan_dummy)
+                      false, 2, # slice_by_slice, upsample_factor
+                      cat_dummy, cat_dummy, # final filter, rec_otf
+                      [], # subpixel shifters
+                      cat_dummy, cat_dummy, # ftorder, order
+                      rat_dummy, cat_dummy, cat_dummy,# result, result_rft, result_rft_tmp
+                      plan_dummy, plan_dummy)
     end
 end
 

@@ -6,6 +6,7 @@ using CUDA
 using FourierTools # for resampling and diagnostic purposes
 using View5D  # for visualization, @vt etc.
 using PointSpreadFunctions
+using DeconvOptim
 
 function main()
     use_cuda = false;

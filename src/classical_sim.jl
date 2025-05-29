@@ -298,6 +298,9 @@ function recon_sim_prepare(sim_data, sp::SIMParams, rp::ReconParams)
             h_goal = rec_otf.*0 .+ 1;
         end
 
+        if (rp.do_deconvolve)
+            prep.rec_otf = rec_otf
+        end
         prep.final_filter = ACT(h_goal) .* conj.(rec_otf)./ (abs2.(rec_otf) .+ RT(rp.wiener_eps))
         #final_filter = fftshift(rfft(real.(ifft(ifftshift(final_filter)))), [2,3])
         prep.final_filter = rfftshift(rfft(fftshift(real.(ifft(ifftshift(prep.final_filter))))))
