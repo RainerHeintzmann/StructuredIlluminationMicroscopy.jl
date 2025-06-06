@@ -4,6 +4,7 @@ authors = ["Rainer Heintzmann"]
 version = "0.1.0"
 
 [deps]
+DeconvOptim = "03e7cd2f-1a03-4ea9-b59b-760a446df67f"
 FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
 FindShift = "643ec891-bf64-479f-8088-26ff5ce1b396"
 FourierTools = "b18b359b-aebc-45ac-a139-9c0ccbb2871e"
@@ -16,6 +17,7 @@ SeparableFunctions = "c8c7ead4-852c-491e-a42d-3d43bc74259e"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 
 [compat]
+DeconvOptim = "0.7.4"
 FourierTools = "0.4"
 Images = "0.26"
 IndexFunArrays = "0.2"

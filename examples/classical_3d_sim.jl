@@ -16,7 +16,7 @@ function main()
     sampling = (0.05, 0.05, 0.08)  # sampling in the orginal (high-res.) simulation grid. Should be at least twice as good as needed along XY.
     obj_sz = (512, 512, 128)
     downsample_factor = 2 # is only applied in XY, not in Z
-    detection_sz = (obj_sz[1] ÷ downsample_factor, obj_sz[2] ÷ downsample_factor, obj_sz[3]) # size of the detection grid
+    # detection_sz = (obj_sz[1] ÷ downsample_factor, obj_sz[2] ÷ downsample_factor, obj_sz[3]) # size of the detection grid
 
     # d_Abbe = lambda / (2*NA) # Abbe resolution limit: 266 nm
     # d_Abbe_rel = sampling[1] / d_Abbe # Abbe resolution limit relative to sampling: 
@@ -53,6 +53,8 @@ function main()
     rp.use_hgoal = true;
     rp.hgoal_exp = 0.5;
 
+    rp.do_deconvolve = false
+
     #################### process slice by slice
     rp.slice_by_slice = true
     prep_seq = prep = recon_seq = nothing; GC.gc(); # to clear the memory    
@@ -64,7 +66,7 @@ function main()
     @time recon_seq = recon_sim(sim_data, prep_seq, sp); # 0.8 sec (256x256x128) 
 
     wf = resample(sum(sim_data, dims=ndims(sim_data))[:,:,:,1], size(recon_seq));
-    @vt obj wf recon_seq 
+    # @vt obj wf recon_seq 
 
     ##################### process by 3D SIM algorithm
 
@@ -74,13 +76,23 @@ function main()
 
     # @vv sim_data
     rp.slice_by_slice = false
+    rp.do_deconvolve = false
     prep_seq = prep = recon = nothing; GC.gc(); # to clear the memory    
-    @time prep = recon_sim_prepare(sim_data, sp, rp); # 23 sec
 
+    @time prep = recon_sim_prepare(sim_data, sp, rp); # 23 sec
     @time recon = recon_sim(sim_data, prep, sp); # 1.3 sec (256x256x128 raw), 5.2 sec
     wf = resample(sum(sim_data, dims=ndims(sim_data))[:,:,:,1], size(recon));
     # @vt recon
-    @vt obj wf recon max.(0, recon) recon_seq  
+
+    rp.do_deconvolve = true
+    @time prepd = recon_sim_prepare(sim_data, sp, rp); # 23 sec
+    @time recond = recon_sim(sim_data, prepd, sp); # 1.3 sec (256x256x128 raw), 5.2 sec
+
+    rp.slice_by_slice = true
+    @time prepds = recon_sim_prepare(sim_data, sp, rp); # 23 sec
+    @time reconds = recon_sim(sim_data, prepds, sp); # 1.3 sec (256x256x128 raw), 5.2 sec
+
+    @vt obj wf recon max.(0, recon) recond recon_seq  
 
     @vt  ft(obj) ft(recon_seq)  ft(recon) ft(wf)
 

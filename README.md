@@ -77,9 +77,7 @@ Pkg.add("StructuredIlluminationMicroscopy")
 
 # ToDo
 - [ ] Add example for two-dimensional excitation patterns
-- [ ] Add code for parameter estimation
 - [ ] sharing memory between pre-allocated arrays result_rft and [result, order, ftorder]
-- [ ] Add proper 3D support (one linked OTF per order)
 - [ ] Add support for automatic differentiation
 - [ ] Add spatial (Labouesse Masterthesis DOI:10.13140/RG.2.2.25191.66727) reconstruction mode
 - [ ] Add more examples

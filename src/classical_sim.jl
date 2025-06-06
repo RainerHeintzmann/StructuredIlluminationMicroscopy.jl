@@ -368,25 +368,37 @@ function recon_sim(sim_data, prep, sp::SIMParams)
     res, bsz = separate_and_place_orders(sim_data, sp, prep)
     
     # apply final frequency-dependent multiplication (filtering)
-    if (prod(size(prep.final_filter))>1) # haskey(prep, :final_filter))
-        res .*= prep.final_filter
-    end
-
-    # apply IFT of the final ft-image
-
-    res_tmp = prod(size(prep.result_rft_tmp))>1 ? prep.result_rft_tmp : similar(res);
-    result = prod(size(prep.result))>1 ? prep.result : similar(sim_data, eltype(sim_data), bsz...)
-    # rec_tmp = haskey(prep, :result_tmp) ? prep.result_tmp : similar(rec)
-
-    rifftshift!(res_tmp, res)
-    # res_tmp = res
-    # fftshift_even!(res_tmp, 2:ndims(res_tmp))
-
-    if (prod(size(prep.plan_irfft))>=1) # isnothing(prep.plan_irfft)
-        result .= irfft(res_tmp,  bsz[1])
+    if (prod(size(prep.rec_otf))>1) # use deconvolution
+        mypsf = real.(ifft(fftshift(prep.rec_otf)))
+        res_tmp = copy(res)
+        rifftshift!(res_tmp, res)
+        result = prod(size(prep.result))>1 ? prep.result : similar(sim_data, eltype(sim_data), bsz...)
+        result .= fftshift(irfft(res_tmp,  bsz[1]))        
+        @show "deconvolving with rec_otf"
+        # result, o = deconvolution(result, mypsf, regularizer=TH(), λ=0.0001, loss=Anscombe(100f0));
+        result, o = deconvolution(result, mypsf, regularizer=TH(), λ=1.2, loss=Gauss());
+        return result
     else
-        mul!(result, prep.plan_irfft, res_tmp)  # to apply an out-of-place irfft with preaccolaed memory
+        if (prod(size(prep.final_filter))>1) # haskey(prep, :final_filter))
+            res .*= prep.final_filter
+        end
+        # apply IFT of the final ft-image
+
+        res_tmp = prod(size(prep.result_rft_tmp))>1 ? prep.result_rft_tmp : similar(res);
+        result = prod(size(prep.result))>1 ? prep.result : similar(sim_data, eltype(sim_data), bsz...)
+        # rec_tmp = haskey(prep, :result_tmp) ? prep.result_tmp : similar(rec)
+        rifftshift!(res_tmp, res)
+        # res_tmp = res
+        # fftshift_even!(res_tmp, 2:ndims(res_tmp))
+
+        if (prod(size(prep.plan_irfft))>=1) # isnothing(prep.plan_irfft)
+            result .= irfft(res_tmp,  bsz[1])
+        else
+            mul!(result, prep.plan_irfft, res_tmp)  # to apply an out-of-place irfft with preaccolaed memory
+        end
+        return result
     end
+
     # rec .= rec_tmp
     # fftshift!(rec, rec_tmp)
     # rec = fftshift(irfft(ifftshift(res, [2,3]), bsz[1]))
@@ -395,6 +407,5 @@ function recon_sim(sim_data, prep, sp::SIMParams)
     # @vt real.(rec) sum(sim_data, dims=3)[:,:,1]
     # @vt ft(real.(rec)) ft(sum(sim_data, dims=3)[:,:,1]) ft(obj)
 
-    return result
 end
 

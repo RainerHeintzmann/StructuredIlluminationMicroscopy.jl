@@ -76,6 +76,7 @@ module StructuredIlluminationMicroscopy
     using SeparableFunctions
     using Statistics # for mean
     using FindShift # for subpixel correlation
+    using DeconvOptim 
 
     export PSFParams, SIMParams, ReconParams, PreparationParams
     export generate_peaks, simulate_sim, recon_sim_prepare, recon_sim, make_3d_pattern, get_otfs, get_kz
