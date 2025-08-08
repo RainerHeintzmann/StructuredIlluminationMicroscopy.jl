@@ -19,6 +19,7 @@ function main()
     k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases = generate_peaks(num_images, num_directions, num_orders, rel_peak / (num_orders-1))
 
     num_photons = 100.00
+    num_photons_bg = 0.0 # 100.0 # background photons
 
     obj = Float32.(testimage("resolution_test_512"));
     obj[(size(obj).÷2 .+1)...] = 2.0 
@@ -32,7 +33,7 @@ function main()
     # obj .= 1f0
     downsample_factor = 2
     mypsf = psf(size(obj), pp, sampling=sampling)
-    spf = SIMParams(mypsf, num_photons, 100.0, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases);
+    spf = SIMParams(mypsf, num_photons, num_photons_bg, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases);
     @time sim_data, sp = simulate_sim(obj, spf, downsample_factor);
     if (use_cuda)
         sim_data = CuArray(sim_data);
@@ -41,41 +42,55 @@ function main()
     #################################
 
     # @vv sim_data
+
+    k_vecs = [(102, 0),(-51, 89),(-51, -89)]
+    # k_vecs = nothing
+    sp_est = estimate_parameters(sim_data, sp.mypsf; k_vecs=k_vecs,
+                            num_directions=num_directions, ideal_strength=true)
+
+    @show sp.k_peak_pos
+    @show sp_est.k_peak_pos
+    @show sp.peak_phases # .- 1.492
+    @show sp_est.peak_phases # .- 1.492 
+    @show sp.peak_strengths
+    @show sp_est.peak_strengths
+
     rp = ReconParams() # just use defaults
     rp.upsample_factor = 2 # 1 means no upsampling
-    rp.wiener_eps = 1e-4
+    rp.wiener_eps = 4e-3 # 1e-4
     rp.suppression_strength = 0.99
     rp.suppression_sigma = 5e-2
     rp.do_preallocate = true
-    rp.use_measure=!use_cuda
+    rp.use_measure = !use_cuda
     rp.double_use=true; rp.preshift_otfs=true; 
-    rp.use_hgoal = true
-    rp.hgoal_exp = 0.5
+    rp.hgoal = hgoal_j0 # (rrel) -> hgoal_exp(rrel; exponent=0.3)
 
-    k_vecs = [(102, 0,0),(-51, 89,0),(-51, -89, 0)]
-    # k_vecs = nothing
-    sp_est = estimate_parameters(sim_data, sp.mypsf; k_vecs=k_vecs,
-                            num_directions=num_directions, prefilter_correl=false, ideal_strength=false)
-
-    sp.k_peak_pos
-    sp_est.k_peak_pos
-    sp.peak_phases # .- 1.492
-    sp_est.peak_phases # .- 1.492 
-    sp.peak_strengths
-    sp_est.peak_strengths
-
-    prep = recon_sim_prepare(sim_data, sp, rp); # do preallocate
+    use_final_filter = true # if false, the final is not applied, yielding a flat-noise spectrum
+    prep = recon_sim_prepare(sim_data, sp, rp; use_final_filter=use_final_filter); # do preallocate
     @time recon = recon_sim(sim_data, prep, sp);
+
     # CUDA.@allowscalar wf = resample(sum(sim_data, dims=3)[:,:,1], size(recon))
     wf = resample(sum(sim_data, dims=3)[:,:,1], size(recon))
     # @vt recon
     @vt obj wf recon 
     @vt ft(obj) ft(wf) ft(recon) 
 
-    prep2 = recon_sim_prepare(sim_data, sp_est, rp); # do preallocate
+    # now use the parameters estimated from the (noisy) data
+    prep2 = recon_sim_prepare(sim_data, sp_est, rp; use_final_filter=use_final_filter); # do preallocate
     @time recon2 = recon_sim(sim_data, prep2, sp_est);
     @vt recon recon2 
     @vt ft(obj) ft(recon) ft(recon2) 
+
+    if (false) # compare with perfect data to see the noise
+        spf_p = SIMParams(mypsf, 0.0, 0.0, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases);
+        @time sim_data_p, sp_p = simulate_sim(obj, spf_p, downsample_factor);
+        sim_data_p = num_photons .* sim_data_p ./ maximum(sim_data_p)
+
+        prep_p = recon_sim_prepare(sim_data_p, sp, rp; use_final_filter=use_final_filter); # do preallocate
+        @time recon_p = recon_sim(sim_data_p, prep_p, sp);
+        # @vt recon recon_p recon.-recon_p
+        @vt ft(obj) ft(recon) ft(recon_p) ft(recon.-recon_p)
+    end
 
     if use_cuda
         @btime CUDA.@sync recon = recon_sim(sim_data, prep, sp);  # 480 µs (one zero order, 256x256)

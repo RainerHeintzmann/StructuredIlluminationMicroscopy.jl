@@ -14,6 +14,7 @@ Fields:
 + `peak_strengths::Array{Float64,2}` : peak-intensities in k-space. This is a 2D array with the first dimension being the number of peaks and the second dimension being the number of intensities   (i.e. the intensities of each peak in each image)
 + `otf_indices::Array{Int, 1}` : otf-indices. An array of indices that indicate the OTF to be used for each peak. Note that for three-dimensional OTFs some peaks have associated OTFs where the z-modulation is part of the OTF. Due to refractive index mismatch or misalanement of the optical axis, these OTFs are characterized by a relative phase.
 + `otf_phases::Array{Float64, 1}` : the relative phases of the OTFs, which are approximated as a multiplication of the PSF with a cos(k_z z + phase)
++ `otf_exponent::Float64` : the exponent applied to the magnitude of the OTF, typically 1.0 for unmodified OTFS. 
 
 """
 mutable struct SIMParams
@@ -41,14 +42,33 @@ mutable struct SIMParams
     # the relative phases of the OTFs, which are approximated as a multiplication of the PSF with a cos(k_z z + phase)
     otf_phases::Array{Float64, 1}
 
-    function SIMParams(mypsf, n_photons::Float64, n_photons_bg::Float64, k_peak_pos::Array{NTuple{3, Float64}, 1}, peak_phases::Array{Float64,2}, peak_strengths::Array{Float64,2}, otf_indices::Array{Int,1}=[1], otf_phases::Array{Float64,1}=[0.0])  
-        new(mypsf, n_photons, n_photons_bg, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases)
+    # if not equalt to 1.0, the PSF is modified by applying a power to the corresponding OTF.
+    otf_exponent::Float64
+
+    function SIMParams(mypsf, n_photons::Float64, n_photons_bg::Float64, k_peak_pos::Array{NTuple{3, Float64}, 1}, peak_phases::Array{Float64,2}, peak_strengths::Array{Float64,2}, otf_indices::Array{Int,1}=[1], otf_phases::Array{Float64,1}=[0.0], otf_exponent=1.0)  
+        if (otf_exponent != 1.0)
+                myotf = rfft(mypsf)
+                mypsf = irfft(myotf .* abs.(myotf).^otf_exponent ./ (abs.(myotf) .+ 1f-10), size(mypsf,1))
+        end
+        new(mypsf, n_photons, n_photons_bg, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases, otf_exponent)
     end
-    function SIMParams(sp::SIMParams; mypsf=sp.mypsf, n_photons=sp.n_photons, n_photons_bg=sp.n_photons_bg, k_peak_pos=sp.k_peak_pos, peak_phases=sp.peak_phases, peak_strengths=sp.peak_strengths, otf_indices=sp.otf_indices, otf_phases=sp.otf_phases)
-        new(mypsf, n_photons, n_photons_bg, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases)
+    function SIMParams(sp::SIMParams; mypsf=sp.mypsf, n_photons=sp.n_photons, n_photons_bg=sp.n_photons_bg, k_peak_pos=sp.k_peak_pos, peak_phases=sp.peak_phases, peak_strengths=sp.peak_strengths, otf_indices=sp.otf_indices, otf_phases=sp.otf_phases, otf_exponent=sp.otf_exponent)
+        new(mypsf, n_photons, n_photons_bg, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases, otf_exponent)
     end
 end
 
+"""
+    resample_sim_params(sp::SIMParams, resample_factor)
+
+Resamples the SIMParams to a new size by resampling the PSF and adjusting the peak positions.
+The `resample_factor` is a number that indicates the factor by which to resample each XY dimension. Z is not resampled.
+If the factor is less than or equal to 2, the PSF is resampled, otherwise it is not.
+
+# Arguments:
+- `sp::SIMParams`: the SIMParams to resample
+- `resample_factor`: a tuple of integers that indicates the factor by which to resample each dimension. If the factor is less than or equal to 2, the PSF is resampled, otherwise it is not.
+
+"""
 function resample_sim_params(sp::SIMParams, resample_factor)
     resample_factor = ntuple((d) -> (d<=2) ? resample_factor : 1, length(sp.k_peak_pos[1]))
     # new_sampling =  sp.sampling .* resample_factor 
@@ -57,14 +77,7 @@ function resample_sim_params(sp::SIMParams, resample_factor)
         if (resample_factor == 1)
             sp.mypsf
         else
-            old_size = size(sp.mypsf)
-            new_size = Int.(round.(old_size ./ resample_factor[1:ndims(sp.mypsf)]))
-            new_size_rft = ntuple((d) -> (d>=2) ? new_size[d] : new_size[d]÷2+1, length(new_size))
-            old_rft_center = ntuple((d) -> (d>=2) ? old_size[d]÷2+1 : 1, length(old_size))
-            new_rft_center = ntuple((d) -> (d>=2) ? new_size[d]÷2+1 : 1, length(new_size))
-            # real.(fftshift(ifft(select_region(fft(ifftshift(sp.mypsf)), new_size))))
-            # fftshift(irfft(rifftshift(select_region(rfftshift(rfft(ifftshift(sp.mypsf))), new_size_rft, center=rft_center)), new_size[1]))
-            fftshift(irfft(rifftshift(select_region(rfftshift(rfft(ifftshift(sp.mypsf))), new_size_rft, center=old_rft_center, dst_center=new_rft_center)), new_size[1]))
+            resample_by_rft(sp.mypsf, size(sp.mypsf) .÷ resample_factor[1:ndims(sp.mypsf)])
         end
     end
     return SIMParams(sp; mypsf=resampled_psf, k_peak_pos=new_peakpos)
@@ -78,6 +91,8 @@ You can use the default constructor `ReconParams()` to get the default values, t
 or use the named constructor to set the values.
 
 Fields:
++ `notch::Union{AbstractArray{<:Real}, Nothing}` : the notch filter to be applied to the OTFs, can be `nothing` if no notch filter is used.
+     It can also be a vector of notch filters, one for each OTF.
 + `suppression_sigma::Float64` : the sigma of the Gaussian suppression filter
 + `suppression_strength::Float64` : the strength of the Gaussian suppression filter
 + `upsample_factor::Int` : the upsampling factor
@@ -86,27 +101,33 @@ Fields:
 + `use_measure::Bool` : use the measurement for the reconstruction
 + `double_use::Bool` : use the measurement twice for the reconstruction
 + `preshift_otfs::Bool` : preshift the OTFs
-+ `use_hgoal::Bool` : use the hgoal algorithm
-+ `hgoal_exp::Float64` : the exponent of the hgoal algorithm
++ `hgoal` : a function defining the goal transfunction. Default is hgoal_one() which yield a constant of one.
 + `hgoal_thresh::Float64` : threshold to determine the hgoal footprint to which the distance transform is applied to
++ `slice_by_slice::Bool` : slice by slice reconstruction
++ `do_deconvolve::Bool` : deconvolve the result instead of Wiener filtering
++ `deconv_lambda::Float64` : the lambda parameter for deconvolution, typically 1.2
++ `keep_hf::Bool` : whether to keep the high-frequency components of the OTFs (default: false)
++ `otf_radius::Float64` : the relative radius of the pupil compared to the sampling limit, used for the OTF masks. zero means that a threshold is used instead of a radius. default is 0.0
 
 """
 mutable struct ReconParams
-    notch::Union{AbstractArray{<:Real}, Nothing}
-    suppression_sigma::Float64
-    suppression_strength::Float64
-    upsample_factor::Int
-    reference_slice::Int
-    wiener_eps::Float64
-    hgoal_exp::Float64
-    hgoal_thresh::Float64
-    do_preallocate::Bool
-    use_measure::Bool
-    double_use::Bool
-    preshift_otfs::Bool
-    use_hgoal::Bool
-    slice_by_slice::Bool
-    do_deconvolve::Bool
+    notch::Union{AbstractArray{<:Real}, Nothing} # the notch filters to be applied to the OTFs, can be nothing if no notch or gaussian notch filter is used.
+    suppression_sigma::Float64 # the sigma of the Gaussian suppression filter, typically 0.2
+    suppression_strength::Float64 # the sigma (relative to image size) of the Gaussian suppression filter, typically 0.2
+    upsample_factor::Int # the upsampling factor, typically 2 for 2x upsampling
+    reference_slice::Int # the slice to use as (alignment) reference for the reconstruction, typically 0 for no reference slice
+    wiener_eps::Float64 # epsilon value for the Wiener filter, typically 1e-6
+    hgoal_thresh::Float64 # threshold to determine the hgoal footprint to which the distance transform is applied to. Also gets used to determine the OTF footprint for keep_hf below
+    do_preallocate::Bool # whether to preallocate memory for the reconstruction
+    use_measure::Bool # whether to use the measurement for the reconstruction
+    double_use::Bool # whether to reuse some memory in the reconstruction
+    preshift_otfs::Bool # whether to preshift the OTFs
+    hgoal::Function # whether to use the hgoal algorithm
+    slice_by_slice::Bool # whether to reconstruct slice by slice
+    do_deconvolve::Bool # whether to deconvolve the result instead of Wiener filtering
+    deconv_lambda::Float64 # the lambda parameter for deconvolution, typically 1.2
+    keep_hf::Bool # whether to keep the high-frequency components of the OTFs (default: false)
+    otf_radius::Float64 # the radius of the pupil, used for the otf masks. zero means that a threshold is used instead of a radius
 
     function ReconParams(; # constructor with default values
         notch = nothing,
@@ -115,21 +136,21 @@ mutable struct ReconParams
         upsample_factor::Int = 2,
         reference_slice::Int = 0,
         wiener_eps = 1e-6,
-        hgoal_exp = 0.5, # only used if use_hgoal is true
         hgoal_thresh = 2e-8, # threshold to determine the hgoal footprint to which the distance transform is applied to
+        hgoal = hgoal_one, # a function
         do_preallocate=true,
         use_measure=false, # to work with CUDA
         double_use=true,
         preshift_otfs=true,
-        use_hgoal=true, slice_by_slice=false)
+        slice_by_slice=false, do_deconvolve=false, deconv_lambda=1.2, keep_hf=false)
+        otf_radius = 0.0 # 0 means that a threshold is used instead of a radius
         new(notch, Float64(suppression_sigma), 
             Float64(suppression_strength), 
             upsample_factor, 
             reference_slice,
             Float64(wiener_eps),
-            Float64(hgoal_exp),
             Float64(hgoal_thresh),
-            do_preallocate, use_measure, double_use, preshift_otfs, use_hgoal, slice_by_slice)
+            do_preallocate, use_measure, double_use, preshift_otfs, hgoal, slice_by_slice, do_deconvolve, deconv_lambda, keep_hf, otf_radius)
     end
 end
 
@@ -177,6 +198,7 @@ mutable struct PreparationParams{RAT, CAT} # , CT, D, RT, TA <: AbstractArray{CT
     result_rft_tmp::CAT
     plan_fft!::AbstractFFTs.Plan
     plan_irfft::AbstractFFTs.Plan
+    deconv_lambda::Float64
 
     function PreparationParams(RAT::Type)
         CAT = complex_arr_type(RAT, Val(ndims(RAT)))
@@ -184,13 +206,15 @@ mutable struct PreparationParams{RAT, CAT} # , CT, D, RT, TA <: AbstractArray{CT
         cat_dummy = CAT(undef, ntuple((d)->1, ndims(CAT)))
         rat_dummy = RAT(undef, ntuple((d)->0, ndims(RAT)))
         plan_dummy = plan_fft!(cat_dummy)
+        deconv_lambda=1.2;
+
         new{RAT, CAT}(pinv_dummy, [cat_dummy,], [(0,0,0),],
                       false, 2, # slice_by_slice, upsample_factor
                       cat_dummy, cat_dummy, # final filter, rec_otf
                       [], # subpixel shifters
                       cat_dummy, cat_dummy, # ftorder, order
                       rat_dummy, cat_dummy, cat_dummy,# result, result_rft, result_rft_tmp
-                      plan_dummy, plan_dummy)
+                      plan_dummy, plan_dummy, deconv_lambda)
     end
 end
 
@@ -231,12 +255,21 @@ end
 
 fills the sp.otf_indices and sp.otf_phases arrays with sensible values for a 3D pattern.
 """
-function make_3d_pattern(k_peak_pos, offset_phase=0.0)
+function make_3d_pattern(k_peak_pos, offset_phase=0.0; individual_otfs=false)
     num_peaks = length(k_peak_pos)
     has_kz(p) = (p[3] != 0.0) 
 
-    otf_indices = ones(Int, num_peaks)
-    otf_indices[has_kz.(k_peak_pos)] .= 2
+    otf_indices = let 
+        if (individual_otfs)
+            collect(1:length(k_peak_pos))
+        else
+            ones(Int, num_peaks)
+        end
+    end
+    if !(individual_otfs)
+        otf_indices[has_kz.(k_peak_pos)] .= 2
+    end
+
     otf_phases = zeros(Float64, num_peaks)
     otf_phases[has_kz.(k_peak_pos)] .= offset_phase
     return otf_indices, otf_phases

@@ -7,7 +7,7 @@
 # The notch filter is then (1 - H_out/(H_in + H-_out))
 
 """
-    get_notch(mypsf, pp, sampling, myeps = 1e-6) 
+    psf_notch(mypsf, pp, sampling, myeps = 1e-6) 
 
 Arguments:
 - mypsf: 3D point spread function
@@ -34,3 +34,23 @@ function gaussian_notch(otf, contrast, sigma)
     RT = real(eltype(otf))
     real_arr_type(typeof(otf), Val(2))(one(RT) .- RT(contrast) .* exp.(-rr2(RT, size(otf)[1:2], scale=ScaFT)/(2*sigma^2)))
 end
+
+
+"""
+    notch_filter(mypsf, constrast=1.0, sigma=0.2)
+
+Applies a Gaussian notch filter to the PSF by multiplaction in the Fourier domain.
+
+Arguments:
+- mypsf: 2D or 3D point spread function
+- constrast: The contrast of the notch filter, 0 means no notch, 1 means full notch
+- sigma: The sigma of the Gaussian notch filter, larger means more smooth
+Returns:
+- The filtered PSF
+"""
+function notch_filter(mypsf, constrast=1.0, sigma=0.2)
+    otf = fftshift(fft(ifftshift(mypsf)))
+    notch = gaussian_notch(otf, constrast, sigma)
+    return real.(fftshift(fft(ifftshift(otf .*notch))))
+end
+

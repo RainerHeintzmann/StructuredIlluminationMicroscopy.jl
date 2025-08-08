@@ -24,7 +24,30 @@ Parameters:
 function pinv_weight_matrix(sp; Eps=1e-6)
     res = pinv(weight_matrix(sp))
     res[abs.(res) .< Eps] .= 0.0
+
+    res = correct_pinv_weight_matrix(res)
     return res
+end
+
+"""
+    correct_pinv_weight_matrix(mypinv)
+
+modifies the pseudo inverse unmixing matrix such that the result is equal variance normalized.
+"""
+function correct_pinv_weight_matrix(mypinv)
+    res_variances = abs2.(mypinv) * ones(size(mypinv, 2))
+    return mypinv ./ sqrt.(res_variances) # return the variances of the orders
+end
+
+"""
+    get_sep_order_variances(sp; Eps=1e-6)
+
+calculates the error propagation variances of the orders when separated by applying the pseudo-inverse of the weight matrix.
+Each measured image is assumed to posess the same variance, which is 1.0.
+"""
+function get_sep_order_variances(sp; Eps=1e-6)
+    M_inv = pinv_weight_matrix(sp; Eps=Eps)
+    return abs2.(M_inv) * ones(size(M_inv, 2)) # return the variances of the orders
 end
 
 """
@@ -350,4 +373,196 @@ end
 function squeeze_dim(arr, dim)
     ids = ntuple((d) -> (d==dim) ? 1 : Colon(), ndims(arr))
     return @view arr[ids...]
+end
+
+
+"""
+    resample_by_rft(data, newsize = size(data) .* (2,2,1))
+
+resamples real-valued data by using rfts. The resampled new size is specified by `newsize`, which defaults to double the size in the first two dimensions and the same size in the last dimension.
+"""
+function resample_by_rft(data, new_size= size(data) .* (2,2,1))
+    old_size = size(data)
+    new_size = Int.(round.(new_size))
+    new_size_rft = ntuple((d) -> (d>=2) ? new_size[d] : new_size[d]÷2+1, length(new_size))
+    old_rft_center = ntuple((d) -> (d>=2) ? old_size[d]÷2+1 : 1, length(old_size))
+    new_rft_center = ntuple((d) -> (d>=2) ? new_size[d]÷2+1 : 1, length(new_size))
+    # real.(fftshift(ifft(select_region(fft(ifftshift(data)), new_size))))
+    # fftshift(irfft(rifftshift(select_region(rfftshift(rfft(ifftshift(data))), new_size_rft, center=rft_center)), new_size[1]))
+    fftshift(irfft(rifftshift(select_region(rfftshift(rfft(ifftshift(data))), new_size_rft, center=old_rft_center, dst_center=new_rft_center)), new_size[1]))
+end
+
+
+"""
+    kz_otf_extend(sz, maxpix, n=1.52, NA=1.4)
+
+calculates the kz extend of the OTF for a given size `sz` and maximum pixel distance `maxpix`. The refractive index `n` and numerical aperture `NA` can be specified, defaulting to 1.52 and 1.4, respectively.
+
+# Parameters:
++ `sz` : size of the OTF
++ `maxpix` : maximum pixel distance of the OTF border from the center
++ `n` : refractive index, default 1.52
++ `NA` : numerical aperture, default 1.4
+Returns the kz extend of the OTF as a 2D array.
+
+# Example:
+```julia
+> res = kz_otf_extend((100, 100), 50)
+```
+"""
+function kz_otf_extend(sz, maxpix, n=1.52, NA=1.4)
+    sin_max_alpha = NA/n
+    midpos = sz .÷ 2 .+ 1
+    if any(maxpix .> midpos)
+        @warn "kz_otf_extend: maxpix $(maxpix) should be smaller than half the number of pixels $(sz)"
+    end
+    kxy_rel = [norm((Tuple(ci) .- midpos)./maxpix) for ci in CartesianIndices(sz)]
+    sin_alpha = min.((kxy_rel .- 0.5) .* 2, 1) .*sin_max_alpha
+    return cos.(asin.(sin_alpha)) .- cos(asin(sin_max_alpha))# kz = (1.0 - sqrt(1 - sin_alpha^2)) / k0[3]
+end
+
+inbounds(ind, sz) = all(ind .>= 1) && all(ind .<= sz)
+
+"""
+    get_otf_weights(otf_kz_extend::AbstractArray, sp::SIMParams)
+
+returns a weight to apply for each `sp.k_peak_pos` shift vector. It is solely based on the kz extend of the OTF.
+
+# Parameters:
++ `otf_kz_extend` : 2D array of the kz extend of the OTF
++ `sp::SIMParams` : SIMParams object containing the peak positions `k_peak_pos`
++ `dsf` : downsample factor, default (2,2)
++ `p_exp` : exponent for the p-norm, default Inf (for binary weights)
+returns a 3D array of weights for each peak position and a 2D array of the destination height values.
+The weights are calculated by finding the best kz value for each pixel in the destination image, based on the peak positions in `sp.k_peak_pos`. The weights are accumulated based on the p-norm of the kz values.
+If `p_exp` is set to Inf, the weights are binary, indicating whether the kz value is the best for that pixel or not.
+If `p_exp` is set to a finite value, the weights are the p-norm of the kz values, which are then normalized later.
+
+# Example:
+```julia
+> otf_kz = kz_otf_extend((100, 100), 40)
+> otf_weights, dst_height = get_otf_weights(otf_kz, sp)
+"""
+function get_otf_weights(otf_kz::AbstractArray, sp::SIMParams, dsf=(2,2); p_exp = Inf)
+    # to accound for both shift directions, we need to double the number of peak positions
+    otf_weights = zeros(Float32, (size(otf_kz)[1:2]..., length(sp.k_peak_pos)*2))
+    dst_height = zeros(Float32, ((size(otf_kz) .* dsf)[1:2]...))
+    int_kxy_peak = [round.(Int, k_xy_peak[1:2] .* (size(otf_kz).÷2)[1:2]) for k_xy_peak in sp.k_peak_pos] # convert the peak positions to integer pixel positions
+    negate(x) = .-(x)
+    both_int_kxy_peak = vcat(int_kxy_peak, negate.(int_kxy_peak)) # add the negative peak positions
+    mid_dst = (size(otf_kz).* dsf) .÷ 2 .+ 1 # destination center coordinates
+    mid_src = size(otf_kz) .÷ 2 .+ 1 # destination center coordinates
+    delta_mid = mid_dst .- mid_src # difference between destination and source center coordinates
+    for ci in CartesianIndices(size(otf_kz) .* dsf) # destination coordinates
+        best_otf = 1
+        best_idx = (0,0)
+        best_kz = eltype(otf_kz)(0)
+        weighted_height = eltype(otf_kz)(0)
+        sum_weights = eltype(otf_kz)(0)
+        # if (Tuple(ci) == mid_dst)
+        #     n=1
+        #     for kxy_peak in int_kxy_peak
+        #         idx_a = (Tuple(ci) .- kxy_peak .- delta_mid) # possible source coordinates
+        #         idx_b = (Tuple(ci) .+ kxy_peak .- delta_mid)
+        #         println("$(otf_weights[idx_a..., n]) $idx_a")
+        #         println("$(otf_weights[idx_b..., n]) $idx_b")
+        #         n+=1
+        #     end
+        # end
+        n = 1
+        for kxy_peak in both_int_kxy_peak
+            idx_a = (Tuple(ci) .+ kxy_peak .- delta_mid) # possible source coordinates
+            if inbounds(idx_a, size(otf_kz))
+                kz = otf_kz[idx_a...] # add the kz offset from the peak position
+                if (kz > best_kz)
+                    best_kz = kz
+                    best_otf = n 
+                    best_idx = idx_a
+                end
+                if !isinf(p_exp)
+                    w = abs(kz)^p_exp # accumulate the p-norm of the kz values
+                    otf_weights[idx_a..., n] += w # accumulate the p-norm of the kz values
+                    sum_weights += w # accumulate the p-norm of the kz values for the destination height
+                    weighted_height += kz * w # accumulate the p-norm of the kz values for the destination height
+                    # if (Tuple(ci) == mid_dst)
+                    #     println("kz: $kz, w: $w, idx_a: $idx_a, n: $n, best_kz: $best_kz, best_idx: $best_idx")
+                    # end
+                end
+            end
+            n +=1
+        end
+        # if (Tuple(ci) == mid_dst)
+        #     n=1
+        #     for kxy_peak in both_int_kxy_peak
+        #         idx_a = (Tuple(ci) .- kxy_peak .- delta_mid) # possible source coordinates
+        #         println("$(otf_weights[idx_a..., n])")
+        #         n+=1
+        #     end
+        # end
+        # in unshifted coordinates:
+        if (p_exp == Inf)
+            if (best_idx != (0,0))
+                otf_weights[best_idx..., best_otf] = one(eltype(otf_kz)) # set the best otf weight to 1
+                dst_height[ci] = best_kz # one(eltype(otf_kz)) # @vt sum(res .* reorient(1:4, Val(3)), dims=3)
+            end
+            # in result coordinates:
+        else
+            # if (Tuple(ci) == mid_dst)
+            #     println("sum is $sum_weights")
+            # end
+            if (sum_weights > 0)
+                dst_height[ci] = weighted_height / sum_weights # one(eltype(otf_kz)) # @vt sum(res .* reorient(1:4, Val(3)), dims=3)
+                n = 1
+                # the normalization is needed to avoid a strong influence of the wiener filter parameter on the results
+                for kxy_peak in both_int_kxy_peak
+                    idx_a = (Tuple(ci) .+ kxy_peak .- delta_mid) # possible source coordinates
+                    # idx_b = (Tuple(ci) .+ kxy_peak .- delta_mid)
+                    # if (Tuple(ci) == mid_dst)
+                    #     println("$(otf_weights[idx_a..., n])")
+                    # end
+                    if inbounds(idx_a, size(otf_kz))
+                        otf_weights[idx_a..., n] /= sum_weights # normalize
+                    end
+                    # if (Tuple(ci) == mid_dst)
+                    #     println("$(otf_weights[idx_a..., n])")
+                    # end
+                    n +=1
+                end
+            end
+        end
+    end
+
+    # otf_weights = otf_weights ./ maximum(otf_weights) # just to bring them close to one to not upset the wiener filter later on
+    # due to symmetry reasons, we can from now on work with only half of the otf_weights, but
+    # we still needed to compute all shifts above to account for the mutual overlap correctly
+    res_otf = min.(1, otf_weights[:,:,1:length(sp.k_peak_pos)])
+    return res_otf, dst_height
+end
+
+"""
+    get_otf_weights(sp::SIMParams, sampling, lambda, NA, n, dsf=(2,2); p_exp = Inf)
+
+returns a weight to apply for each `sp.k_peak_pos` shift vector. It is solely based on the kz extend of the OTF which is calculated from the experimental parameters.
+
+# Parameters:
++ `sp::SIMParams` : SIMParams object containing the peak positions `k_peak_pos`
++ `sampling`: vector of pixel sampling (in µm)
++ `lambda`: wavelength (in µm)
++ `NA`: numerical aperture
++ `n`: refractive index of the embedding medium
++ `dsf` : downsample factor, default (2,2)
++ `p_exp` : exponent for the p-norm, default Inf (for binary weights)
+returns a 3D array of weights for each peak position and a 2D array of the destination height values.
+The weights are calculated by finding the best kz value for each pixel in the destination image, based on the peak positions in `sp.k_peak_pos`. The weights are accumulated based on the p-norm of the kz values.
+If `p_exp` is set to Inf, the weights are binary, indicating whether the kz value is the best for that pixel or not.
+If `p_exp` is set to a finite value, the weights are the p-norm of the kz values, which are then normalized later.
+
+# Example:
+```julia
+> otf_kz = kz_otf_extend((100, 100), 40)
+> otf_weights, dst_height = get_otf_weights(otf_kz, sp)
+"""
+function get_otf_weights(sp::SIMParams, sampling, lambda, NA, n, dsf=(2,2); p_exp = Inf)
+    rmax = (size(sp.mypsf).÷ 2) .* sampling[1:2] ./ (lambda / (4*NA))
+    return get_otf_weights(kz_otf_extend(size(sp.mypsf), rmax, n, NA), sp, dsf; p_exp = p_exp);
 end

@@ -200,8 +200,7 @@ begin
     rp.do_preallocate = true;
     rp.use_measure=true;
     rp.double_use=true; rp.preshift_otfs=true; 
-    rp.use_hgoal = true;
-    rp.hgoal_exp = 0.5;
+    rp.hgoal = hgoal_exp 
 end
 
 # ╔═╡ 28e982ee-90d4-42a1-9e5f-d9e4ce171d07

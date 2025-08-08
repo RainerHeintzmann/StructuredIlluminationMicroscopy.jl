@@ -56,8 +56,7 @@ begin
     rp.do_preallocate = true; rp.use_measure = true
     rp.double_use = true; 
     rp.preshift_otfs= false; # true; 
-    rp.use_hgoal = true;
-    rp.hgoal_exp = 0.5;
+    rp.hgoal = hgoal_exp 
 end
 
 # ╔═╡ fc5f45c3-e252-475e-a1db-8aaa34e59007

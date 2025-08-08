@@ -77,17 +77,27 @@ module StructuredIlluminationMicroscopy
     using Statistics # for mean
     using FindShift # for subpixel correlation
     using DeconvOptim 
+    using SpecialFunctions # for Bessel function j0
+    using FourierTools # used only for grating search algorithms
+    using Dates # for saving grating parameters with timestamp
+    using DelimitedFiles # to load grating para files
 
     export PSFParams, SIMParams, ReconParams, PreparationParams
-    export generate_peaks, simulate_sim, recon_sim_prepare, recon_sim, make_3d_pattern, get_otfs, get_kz
+    export generate_peaks, recon_sim_prepare, recon_sim, make_3d_pattern, get_otfs, get_kz
     export separate_and_place_orders, modify_otf, SIMPattern, get_upsampled_rft, get_result_size, ifftshift_sep!, fftshift_sep!
     export get_shift_subpixel, pinv_weight_matrix, shift_subpixel!, shift_subpixel, shift_subpixel_fft, dot_mul_last_dim!, add!, conj_add!
     export rfft_crop, rfft_size, rfftshift, rifftshift, rfftshift!, rifftshift!, get_rft_center
     export swap_vals!, fftshift!, IntType, force_integer_pixels, estimate_prep_mem, print_mem_usage
     export estimate_parameters
     export preprocess_sim
-    export psf_notch, gaussian_notch
+    export psf_notch, gaussian_notch, remove_oof_light
+    export simulate_sim, simulate_sim_3d
+    export get_otf_weights, kz_otf_extend, test_unmix_real
+    export notch_filter
+    export create_grating_param_file, create_para_list, optimize_grating_sum, find_optimum_set
+    export PARA_SET, create_grating, find_grating, check_phase_steps
 
+    include("h_goal.jl")    
     include("preprocess.jl")    
     include("sim_structures.jl")
     include("utils.jl")
@@ -95,5 +105,7 @@ module StructuredIlluminationMicroscopy
     include("classical_sim.jl")
     include("parameter_estimation.jl")
     include("notch_filters.jl")
+    include("find_grating.jl")
+    include("create_grating.jl")
 
 end

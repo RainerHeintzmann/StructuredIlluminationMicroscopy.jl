@@ -50,8 +50,7 @@ function main()
     rp.do_preallocate = true; rp.use_measure = !use_cuda
     rp.double_use = true; 
     rp.preshift_otfs= false; # true; 
-    rp.use_hgoal = true;
-    rp.hgoal_exp = 0.5;
+    rp.hgoal = hgoal_exp 
 
     rp.do_deconvolve = false
 
