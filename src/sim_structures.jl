@@ -3,12 +3,10 @@
 
 a (mutable) structure that holds the parameters for the simulation. See details below.
 Constructor:
-SIMParams(mypsf, n_photons::Float64, n_photons_bg::Float64, k_peak_pos::Array{NTuple{3, Float64}, 1}, peak_phases::Array{Float64,2}, peak_strengths::Array{Float64,2}, otf_indices::Array{Int,1}=[1], otf_phases::Array{Float64,1}=[0.0])  
+SIMParams(mypsf, k_peak_pos::Array{NTuple{3, Float64}, 1}, peak_phases::Array{Float64,2}, peak_strengths::Array{Float64,2}, otf_indices::Array{Int,1}=[1], otf_phases::Array{Float64,1}=[0.0])  
 
 Fields:
 + `mypsf` : the point spread function to simulate with.
-+ `n_photons::Float64` : the number of photons
-+ `n_photons_bg::Float64` : the number of background photons
 + `k_peak_pos::Array{NTuple{3, Float64}, 1}` : peak-positions in k-space, a vector of 3D tuples, in relation to the Nyquist frequency of the image
 + `peak_phases::Array{Float64,2}` : peak-phases in k-space. This is a 2D array with the first dimension being the number of peaks and the second dimension being the number of phases  (i.e. the phases in each image)
 + `peak_strengths::Array{Float64,2}` : peak-intensities in k-space. This is a 2D array with the first dimension being the number of peaks and the second dimension being the number of intensities   (i.e. the intensities of each peak in each image)
@@ -21,8 +19,6 @@ mutable struct SIMParams
     # psf_params::PSFParams
     mypsf::AbstractArray
     # sampling::NTuple{3, Float64}
-    n_photons::Float64
-    n_photons_bg::Float64
 
     k_peak_pos::Array{NTuple{3, Float64}, 1}  # peak-positions in k-space, a vector of 3D tuples, in relation to the Nyquist frequency of the image
 
@@ -45,15 +41,15 @@ mutable struct SIMParams
     # if not equalt to 1.0, the PSF is modified by applying a power to the corresponding OTF.
     otf_exponent::Float64
 
-    function SIMParams(mypsf, n_photons::Float64, n_photons_bg::Float64, k_peak_pos::Array{NTuple{3, Float64}, 1}, peak_phases::Array{Float64,2}, peak_strengths::Array{Float64,2}, otf_indices::Array{Int,1}=[1], otf_phases::Array{Float64,1}=[0.0], otf_exponent=1.0)  
+    function SIMParams(mypsf, k_peak_pos::Array{NTuple{3, Float64}, 1}, peak_phases::Array{Float64,2}, peak_strengths::Array{Float64,2}, otf_indices::Array{Int,1}=[1], otf_phases::Array{Float64,1}=[0.0], otf_exponent=1.0)  
         if (otf_exponent != 1.0)
                 myotf = rfft(mypsf)
                 mypsf = irfft(myotf .* abs.(myotf).^otf_exponent ./ (abs.(myotf) .+ 1f-10), size(mypsf,1))
         end
-        new(mypsf, n_photons, n_photons_bg, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases, otf_exponent)
+        new(mypsf, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases, otf_exponent)
     end
-    function SIMParams(sp::SIMParams; mypsf=sp.mypsf, n_photons=sp.n_photons, n_photons_bg=sp.n_photons_bg, k_peak_pos=sp.k_peak_pos, peak_phases=sp.peak_phases, peak_strengths=sp.peak_strengths, otf_indices=sp.otf_indices, otf_phases=sp.otf_phases, otf_exponent=sp.otf_exponent)
-        new(mypsf, n_photons, n_photons_bg, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases, otf_exponent)
+    function SIMParams(sp::SIMParams; mypsf=sp.mypsf, k_peak_pos=sp.k_peak_pos, peak_phases=sp.peak_phases, peak_strengths=sp.peak_strengths, otf_indices=sp.otf_indices, otf_phases=sp.otf_phases, otf_exponent=sp.otf_exponent)
+        new(mypsf, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases, otf_exponent)
     end
 end
 

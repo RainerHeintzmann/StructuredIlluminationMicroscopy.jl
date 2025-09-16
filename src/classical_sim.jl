@@ -404,9 +404,8 @@ function recon_sim_prepare(sim_data, sp::SIMParams, rp::ReconParams; use_final_f
         end
 
         dobj = collect(delta(eltype(sim_data), size(sim_data)[1:end-1]))  # , offset=CtrFFT)
-        spd = SIMParams(sp, n_photons = 0);
         # simulate the noise-free sim data of a single delta peak to obtain the SIM PSF to be used for constructing the inverse.
-        sim_delta, _ = simulate_sim(dobj, spd);
+        sim_delta, _ = simulate_sim(dobj, sp);
         ART = typeof(sim_data)
         sim_delta = ART(sim_delta)
 

@@ -21,9 +21,8 @@ sampling = (0.06, 0.06, 0.1)  # 100 nm x 100 nm x 200 nm
 # define the SIM illumination pattern
 num_directions = 5  ; num_images =  5*num_directions; num_orders = 3
 k_peak_pos, peak_phases, peak_strengths = generate_peaks(num_images, num_directions, num_orders, 0.48 / (num_orders-1))
-num_photons = 0.0
 mypsf = psf(pp, sampling=sampling)
-sp = SIMParams(mypsf, num_photons, 100.0, k_peak_pos, peak_phases, peak_strengths)
+sp = SIMParams(mypsf, k_peak_pos, peak_phases, peak_strengths)
 
 obj = Float32.(testimage("resolution_test_512"))
 obj[257, 257] = 2.0
@@ -83,15 +82,15 @@ module StructuredIlluminationMicroscopy
     using DelimitedFiles # to load grating para files
 
     export PSFParams, SIMParams, ReconParams, PreparationParams
-    export generate_peaks, recon_sim_prepare, recon_sim, make_3d_pattern, get_otfs, get_kz
+    export generate_peaks, generate_peaks_param, recon_sim_prepare, recon_sim, make_3d_pattern, get_otfs, get_kz
     export separate_and_place_orders, modify_otf, SIMPattern, get_upsampled_rft, get_result_size, ifftshift_sep!, fftshift_sep!
     export get_shift_subpixel, pinv_weight_matrix, shift_subpixel!, shift_subpixel, shift_subpixel_fft, dot_mul_last_dim!, add!, conj_add!
     export rfft_crop, rfft_size, rfftshift, rifftshift, rfftshift!, rifftshift!, get_rft_center
     export swap_vals!, fftshift!, IntType, force_integer_pixels, estimate_prep_mem, print_mem_usage
-    export estimate_parameters
+    export estimate_parameters, apply_photon_noise
     export preprocess_sim
     export psf_notch, gaussian_notch, remove_oof_light
-    export simulate_sim, simulate_sim_3d
+    export simulate_sim, simulate_sim_3d, get_non_linear_saturation
     export get_otf_weights, kz_otf_extend, test_unmix_real
     export notch_filter
     export create_grating_param_file, create_para_list, optimize_grating_sum, find_optimum_set

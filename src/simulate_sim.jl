@@ -1,15 +1,15 @@
 """
-    generate_peaks(num_phases::Int=3, num_directions::Int=3, num_orders=0.0, k0 = 0.9)
+    generate_peaks(num_images::Int=3, num_directions::Int=3, num_orders=0.0, k0 = 0.9)
 
 generates peaks assuming grating-like illuminations
 Parameters:
-+ `num_phases::Int` : number of phases
++ `num_images::Int` : number of phases
 + `num_directions::Int` : number of directions
 + `num_orders::Int` : number of orders
 + `k0::Float64`: peak frequency of first order (relative to the Nyquist frequency of the image)
 + individual_otfs: if true, each k-shift gets its own otf index assigned in the peak generation (default: false)
 """
-function generate_peaks(num_phases::Int=9, num_directions::Int=3, num_orders::Int=2, k1 = 0.9, single_zero_order=true, k1z = 0.0; use_lattice=false, lattice_shift=nothing, individual_otfs=false)
+function generate_peaks(num_images::Int=9, num_directions::Int=3, num_orders::Int=2, k1 = 0.9, single_zero_order=true, k1z = 0.0; use_lattice=false, lattice_shift=nothing, individual_otfs=false)
     num_peaks = num_directions * num_orders;
     if (single_zero_order)
         num_peaks -= num_directions - 1 
@@ -38,11 +38,11 @@ function generate_peaks(num_phases::Int=9, num_directions::Int=3, num_orders::In
     if isnothing(lattice_shift) && use_lattice
         # calculate ideal lattic shift here
     end
-    peak_phases = zeros(num_phases, num_peaks)
-    peak_strengths = zeros(num_phases, num_peaks)
-    phases_per_cycle = num_phases ÷ num_directions
+    peak_phases = zeros(num_images, num_peaks)
+    peak_strengths = zeros(num_images, num_peaks)
+    phases_per_cycle = num_images ÷ num_directions
     current_peak = 1
-    for p in 0:num_phases-1 # starts at zero
+    for p in 0:num_images-1 # starts at zero
         current_d = p ÷ phases_per_cycle  # directions start at 0
         current_peak = 1
         for d in 0:num_directions-1 # starts at zero
@@ -72,6 +72,21 @@ function generate_peaks(num_phases::Int=9, num_directions::Int=3, num_orders::In
 end
 
 """
+    generate_peaks_param(mypsf, vargs...; kwargs...)
+
+calls `generate_peaks` and returns a SIMParams object with the generated peak information packaged into the SIMParams structure.
+
+Parameters:
++ `mypsf::Array` : PSF to use for the SIMParams
++ `vargs...` : arguments to pass to `generate_peaks`
++ `kwargs...` : keyword arguments to pass to `generate_peaks`
+"""
+function generate_peaks_param(mypsf, vargs...; kwargs...)
+    k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases =generate_peaks(vargs...; kwargs...)
+    return SIMParams(mypsf, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases);
+end
+
+"""
     get_kz(pp, sampling, k1)
 
 estimate the kz positions of the peaks, by assuming that they reside on the perfect excitation OTF outer border
@@ -97,19 +112,22 @@ end
 
 
 """
-    simulate_sim(obj, sp::SIMParams)
+    simulate_sim(obj, sp::SIMParams, downsample_factor::Int = 1; n_photons = 0.0, n_photons_bg=0.0, emission_modification=identity)
 
 Simulate SIM data.
 Parameters:
 + `obj::Array` : object or a generator function that generates an object of the same size as the PSF in `sp.mypsf` via calling `obj(size(sp.mypsf))`.
 + `sp::SIMParams` : SIMParams object
 + `downsample_factor::Float64` : downsample factor (e.g. 2.0 means half the number of pixels in each dimension)
++ `n_photons::Float64` : number of photons to simulate (default: 0.0, no photons simulated)
++ `n_photons_bg::Float64` : background photons to simulate (default: 0.0, no background photons simulated)
++ `emission_modification::Function` : (non-linear) function to apply to the object before simulating the emission (default: identity function, no modification)
 
 returned are the simulated data and the SIMParams object with the downsampled PSF and peak phases.
 # Example:
 see the example folder for a complete example.
 """
-function simulate_sim(obj, sp::SIMParams, downsample_factor::Int = 1)
+function simulate_sim(obj, sp::SIMParams, downsample_factor::Int = 1; n_photons = 0.0, n_photons_bg=0.0, emission_modification=identity)
     if (isa(obj, Function))
         obj = eltype(spf.mypsf).(obj_generator(sp.mypsf)) # generate an object
     end
@@ -136,7 +154,7 @@ function simulate_sim(obj, sp::SIMParams, downsample_factor::Int = 1)
             sim_pattern = SIMPattern(h, sp, n, otf_num)
             myidx = ntuple(d->(d==ndims(sim_data)) ? n : Colon(), ndims(sim_data))
             # sim_data[myidx...] .= conv_psf(obj .* sim_pattern, h)
-            myrfft = rfft(obj .* sim_pattern)
+            myrfft = rfft(emission_modification.(obj .* sim_pattern))
             # if (downsample_factor != 1.0)
             #     myrfft = rfft_crop(myrfft, dsz) # leads to downsampling
             # end
@@ -149,18 +167,35 @@ function simulate_sim(obj, sp::SIMParams, downsample_factor::Int = 1)
         end
     end
 
-    if (sp.n_photons != 0.0)
-        sim_data .*= sp.n_photons ./ maximum(sim_data)
-        sim_data .= eltype(sim_data).(poisson(Float64.(sim_data))) # cast is due to a bug in the poisson function
-    end
+    sim_data = apply_photon_noise(sim_data, n_photons, n_photons_bg) # apply photon noise to the simulated data, if needed
 
     spd = resample_sim_params(sp, downsample_factor) # also upsamples the psf
     return sim_data, spd
 end
 
+"""
+    apply_photon_noise(sim_data, n_photons, n_photons_bg=0.0)
+
+Apply photon noise to the simulated data.
+Parameters:
++ `sim_data::Array` : simulated data to apply photon noise to
++ `n_photons::Float64` : number of photons to simulate
++ `n_photons_bg::Float64` : background photons to simulate (default: 0.0, no background photons simulated)
+"""
+function apply_photon_noise(sim_data, n_photons, n_photons_bg=0.0)
+    if (n_photons != 0.0)
+        sim_data_n = sim_data .* eltype(sim_data)(n_photons) ./ maximum(sim_data)
+        sim_data_n .+= eltype(sim_data)(n_photons_bg);
+        sim_data_n .= eltype(sim_data).(poisson(Float64.(sim_data_n))) # cast is due to a bug in the poisson function
+    else
+        sim_data_n = sim_data
+    end
+    return sim_data_n
+end
+
 
 """
-    simulate_sim_3d(spf, mypsf; n_photons = 1000, n_photons_bg=1.2f0, downsample_factor = 2)
+    simulate_sim_3d(spf, mypsf; n_photons = 1000, n_photons_bg=1.2f0, downsample_factor = 2, emission_modification=identity)
 Simulate a 3D SIM data set with a given 3D-PSF (mypsf) and (potentially two-dimensional) SIM  parameters (spf) as used for later object reconstruction.
 
 Parameters:
@@ -173,7 +208,7 @@ Parameters:
 
 returned are the simulated data and the object used for simulation.
 """
-function simulate_sim_3d(obj, spf, mypsf; n_photons = 1000, n_photons_bg=1.2f0, downsample_factor = 2)
+function simulate_sim_3d(obj, spf, mypsf; n_photons = 1000, n_photons_bg=1.2f0, downsample_factor = 2, emission_modification=identity)
     bsz = (size(mypsf,1)*downsample_factor, size(mypsf,2)*downsample_factor, size(mypsf,3))
     if (isa(obj, Function))
         obj = eltype(spf.mypsf).(obj(bsz)) # generate a 3D object
@@ -190,14 +225,26 @@ function simulate_sim_3d(obj, spf, mypsf; n_photons = 1000, n_photons_bg=1.2f0, 
 
     # spf.mypsf = resample(mypsf, (downsample_factor, downsample_factor, 1).*size(mypsf)) # set the PSF in the SIMParams
     spf.mypsf = resample_by_rft(mypsf, (downsample_factor, downsample_factor, 1).*size(mypsf)) # set the PSF in the SIMParams
-    spf.n_photons = n_photons;
-    spf.n_photons_bg = n_photons_bg;
     tmp_k_est = spf.k_peak_pos
     df = (downsample_factor, downsample_factor, 1)
     spf.k_peak_pos = [k_peak_pos./df  for k_peak_pos in (spf.k_peak_pos)]    
-    measured, sp = simulate_sim(obj, spf, downsample_factor);
+    measured, sp = simulate_sim(obj, spf, downsample_factor; n_photons = n_photons, n_photons_bg = n_photons_bg, emission_modification=identity);
     spf.k_peak_pos = tmp_k_est
     spf.mypsf = tmppsf # restore the PSF in the SIMParams
 
     return measured, obj
+end
+
+"""
+get_non_linear_saturation(sat_intensity)
+
+Apply non-linear hyperbolic saturation to the simulated data.
+returns a function:
+res = intensity / (1.0 + intensity / sat_intensity)
+Parameters:
++ `intensity::Array`: intensity to apply non-linear saturation to
++ `sat_intensity::Float64` : saturation intensity, 0.5 means that the maximum value is 50% of the maximum possible value
+"""
+function get_non_linear_saturation(sat_intensity)
+    return (intensity) -> intensity / (1.0 + intensity / sat_intensity)
 end

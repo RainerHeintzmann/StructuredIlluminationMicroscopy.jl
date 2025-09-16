@@ -11,15 +11,6 @@ function main()
     lambda = 0.532; NA = 1.0; n = 1.52
     pp = PSFParams(lambda, NA, n);  # 532 nm, NA 0.25 in Water n= 1.33
     sampling = (0.06, 0.06, 0.1)  # 100 nm x 100 nm x 200 nm
-
-    # SIM illumination pattern
-    num_directions = 3; num_images =  3*num_directions; num_orders = 2
-    rel_peak = 0.40 # peak position relative to sampling limit on fine grid
-    k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases = generate_peaks(num_images, num_directions, num_orders, rel_peak / (num_orders-1))
-
-    num_photons = 1000.00
-    spf = SIMParams(pp, sampling, num_photons, 100.0, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases);
-
     obj = Float32.(testimage("resolution_test_512"));
     obj[(size(obj).÷2 .+1)...] = 2.0 
     if (false)
@@ -27,11 +18,19 @@ function main()
         # obj[257,257] = 1.0
         obj[250,250] = 1.0
     end
+    mypsf = psf(size(obj), pp, sampling=sampling)
+
+    # SIM illumination pattern
+    num_directions = 3; num_images =  3*num_directions; num_orders = 2
+    rel_peak = 0.40 # peak position relative to sampling limit on fine grid
+    spf = generate_peaks_param(mypsf, num_images, num_directions, num_orders, rel_peak / (num_orders-1))
+
     # obj[1,1] = 1.0
     # obj = CuArray(obj)
     # obj .= 1f0
     downsample_factor = 2
-    @time sim_data, sp = simulate_sim(obj, pp, spf, downsample_factor);
+    num_photons = 1000.00
+    @time sim_data, sp = simulate_sim(obj, pp, spf, downsample_factor; n_photons=num_photons);
     if (use_cuda)
         sim_data = CuArray(sim_data);
     end

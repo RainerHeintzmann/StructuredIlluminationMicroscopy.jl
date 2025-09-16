@@ -2,7 +2,7 @@
 """
     function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
                             subtract_mean=true, upsample=false, suppress_sigma=0.0, 
-                            num_directions=0, ideal_strength=true, imply_higher_orders=0,
+                            num_directions=0, ideal_strength=true, implied_higher_orders=0,
                             otf_exponent = 1.0, amp_magnitudes=nothing, individual_otfs=false, show_quality=true)
 
 Estimate the parameters for a SIM image from the experimatal data. This function is used to estimate the parameters for the SIM image from the experimental data. The function uses the experimental data to estimate the parameters for the SIM image.
@@ -12,18 +12,19 @@ The function returns the estimated parameters for the SIM image.
 - `dat::Array`: The experimental data. Should be 2-dimensional plus the 3rd dimension for recordings with different phase and/or direction.
 - `mypsf::Array`: Optional parameter specifying the PSF to use for prefiltering. If `nothing` is provided, the function will assuma delta-psf.
 - `refdat::Array`: The reference data. Typicall the corresponding widefield (zero-order) image.
-- `subtract_mean::Bool`: Subtract the mean.
 - `k_vecs::Array`: The k vectors.
 - `subtract_mean::Bool`: If true, subtract the mean. Default is true.
-- `suppress_sigma`: The width of the center to suppress for the cross-correlation, if > 0. As a ratio of the size. Default is 0.
+- `suppress_sigma`: The width of the center to suppress for the cross-correlation, if > 0. As a ratio of the size. Default is 0. If >0 a suppression of 100% is assumed
 - `num_directions`: Number of directions. Default is 0 which means each frame contains all directions. 
                     If provided, it is assumed that the trailing dimension is subdivided into directions and phases per direction.
 - `ideal_strength`: If true, the strength of the peaks is set to 1. Default is true.
-- `imply_higher_orders`: If not zero, this specifies the number of higher orders which are implied from the first order. Default is 0.
+- `implied_higher_orders`: If not zero, this specifies the number of higher orders which are implied from the first order. Default is 0.
 - `amp_magnitudes`: Optional parameter to specify the magnitudes of the amplitudes of the peaks. If `nothing`, the amplitudes are estimated from the data.
 - `otf_exponent`: The exponent to use for the OTF. Default is 1.0.
 - `individual_otfs`: If true, the function will estimate individual OTFs for each direction. Default is false.
 - `show_quality`: If true, the function will print the conditioning quality of the unmixing matrix. Default is true.
+- `verbose`: If true, the function will print information about the estimation process. Default is true.
+- `phase_only`: If true, the function will only consider the phase information in Fourierspace for the autocorrelation. Default is `false`.
 
 # Returns
 - `sp`: The estimated parameters for the SIM image. This is a `SIMParams` object containing the estimated parameters.
@@ -31,9 +32,10 @@ The function returns the estimated parameters for the SIM image.
 
 """
 function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
-                            subtract_mean=true, upsample=false, suppress_sigma=0.0, 
-                            num_directions=0, ideal_strength=true, imply_higher_orders=0,
-                            otf_exponent = 1.0, amp_magnitudes=nothing, individual_otfs=false, show_quality=true, notch_filter=nothing)
+                            subtract_mean=true, upsample=false, suppress_sigma=0.15, 
+                            num_directions=0, ideal_strength=true, implied_higher_orders=0,
+                            otf_exponent = 1.0, amp_magnitudes=nothing, individual_otfs=false,
+                            show_quality=true, notch_filter=nothing, verbose=true, phase_only=false)
     if num_directions > 0
         num_phases = size(dat, ndims(dat)) ÷ num_directions;
         if num_phases * num_directions != size(dat, ndims(dat))
@@ -52,8 +54,9 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
             end
             spf_sub = estimate_parameters(sub_data, mypsf, refdat; k_vecs=k_vec,  
                                             subtract_mean=subtract_mean, suppress_sigma=suppress_sigma, 
-                                            num_directions=0, ideal_strength=ideal_strength, imply_higher_orders=imply_higher_orders,
-                                            amp_magnitudes=amp_magnitudes, otf_exponent=otf_exponent, individual_otfs=individual_otfs, show_quality=show_quality)
+                                            num_directions=0, ideal_strength=ideal_strength, implied_higher_orders=implied_higher_orders,
+                                            amp_magnitudes=amp_magnitudes, otf_exponent=otf_exponent, individual_otfs=individual_otfs,
+                                            show_quality=show_quality, notch_filter=notch_filter, verbose=verbose, phase_only=phase_only)
             if (d == 1)
                 spf = spf_sub
             else
@@ -80,17 +83,19 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
             end
 
             peaks = kvecs_to_peak(spf_sub.k_peak_pos[2:end], size(dat))
-            if (imply_higher_orders != 0)
+            if (implied_higher_orders != 0)
                 for_print *= " $(peaks[1])"
             else
                 for_print *= " $(peaks)"
             end
         end
         spf.peak_strengths ./= maximum(spf.peak_strengths)
-        println("Put the following line in the next call to estimate_parameters: ")
-        println("k_vecs =" * for_print * ")")
-        if (show_quality)
-            println("conditioning quality of unmxing matrix is $(1 / cond(weight_matrix(spf))), (1.0 is best)")
+        if (verbose)
+            println("Put the following line in the next call to estimate_parameters: ")
+            println("k_vecs =" * for_print * ")")
+            if (show_quality)
+                println("conditioning quality of unmxing matrix is $(1 / cond(weight_matrix(spf))), (1.0 is best)")
+            end
         end
         return spf
     end
@@ -114,28 +119,38 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
     end
 
     # select the PSF to use for prefiltering
-    corr_psf = mypsf ./ sum(mypsf) # let
+    # if isnothing(mypsf)
+    #     mypsf = collect(delta(eltype(dat), size(dat)[1:end-1]))
+    # end
 
-    # modify the PSF to suppress the low frequencies, if wanted
-    corr_otf = fft(corr_psf)
-    shift_x = (angle(-corr_otf[2,1])) .* size(corr_otf,1) / 2pi
-    shift_y = (angle(-corr_otf[1,2])) .* size(corr_otf,2) / 2pi
+    corr_psf = mypsf
+    if !isnothing(mypsf)
+        corr_psf = mypsf ./ sum(mypsf) # let
+        corr_otf = fft(corr_psf)
+        # modify the PSF to suppress the low frequencies, if wanted
+        shift_x = (angle(-corr_otf[2,1])) .* size(corr_otf,1) / 2pi
+        shift_y = (angle(-corr_otf[1,2])) .* size(corr_otf,2) / 2pi
 
-    was_modified = false
-    if (abs(shift_x) > 0.05 || abs(shift_y) > 0.05)
-        @warn "The PSF is significantly asymmtric or shifted by $(shift_x), $(shift_y).\nThis may lead to problems in the estimation. Trying to correct shift"
-        shifter = ifftshift(exp_ikx_col(typeof(corr_otf), size(corr_otf), shift_by=(shift_x, shift_y)))
-        corr_otf .*= shifter
-        was_modified = true
-    end
-    if (suppress_sigma > 0)
-        # construct a 1-gaussian to suppress the low frequencies of the PSF
-        gs = ifftshift(1 .- gaussian_sep(real_arr_type(typeof(corr_psf)), size(corr_psf); sigma=suppress_sigma .* size(corr_psf)))
-        corr_otf .*= gs
-        was_modified = true
-    end
-    if (was_modified)
-        corr_psf = ifft(corr_otf)
+        was_modified = false
+        if (otf_exponent != 1.0)
+            corr_otf .*= cis.(angle.(corr_otf)) .* (abs.(corr_otf) .^ otf_exponent)
+            was_modified = true
+        end
+        if (abs(shift_x) > 0.05 || abs(shift_y) > 0.05)
+            @warn "The PSF is significantly asymmtric or shifted by $(shift_x), $(shift_y).\nThis may lead to problems in the estimation. Trying to correct shift"
+            shifter = ifftshift(exp_ikx_col(typeof(corr_otf), size(corr_otf), shift_by=(shift_x, shift_y)))
+            corr_otf .*= shifter
+            was_modified = true
+        end
+        if (suppress_sigma > 0)
+            # construct a 1-gaussian to suppress the low frequencies of the PSF
+            gs = ifftshift(1 .- gaussian_sep(real_arr_type(typeof(corr_psf)), size(corr_psf); sigma=suppress_sigma .* size(corr_psf)))
+            corr_otf .*= gs
+            was_modified = true
+        end
+        if (was_modified)
+            corr_psf = ifft(corr_otf)
+        end
     end
 
     # use the first provided image as the one to correlate with the reference.
@@ -144,10 +159,11 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
     peak_ref = squeeze_dim(slice(cropped, ndims(cropped), 1), ndims(cropped)) # [:,:,1]
 
     if isnothing(k_vecs)
-        k_vecs, _, _ = get_subpixel_correl(peak_ref; other=refdat, psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=true, show_quality=show_quality)
+        # let the user interactively select the initial k vectors:
+        k_vecs, _, _ = get_subpixel_correl(peak_ref; other=refdat, psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=true, show_quality=show_quality, phase_only=phase_only)
         println("You can call this function with the k_vecs parameter $(k_vecs) to speed up the estimation.")
     else
-        k_vecs, _, _ = get_subpixel_correl(peak_ref; other=refdat, k_est = k_vecs,  psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=false, show_quality=show_quality)
+        k_vecs, _, _ = get_subpixel_correl(peak_ref; other=refdat, k_est = k_vecs,  psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=false, show_quality=show_quality, phase_only=phase_only)
     end
 
     # find_shift(dat[:,:,1], dat[:,:,1])
@@ -157,10 +173,10 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
     # to_tuple = (t) -> (((2 .* t[1:2] ./ (size(dat)[1:2])...,))..., 0.0)
     # k_peak_pos = [(0.0, 0.0, 0.0), to_tuple.(k_vecs)...]
     # k_peak_pos = [(0.0, 0.0, 0.0), (2 .* k_vecs ./ size(dat))...]
-    if (imply_higher_orders > 0)
+    if (implied_higher_orders > 0)
         base_vec = k_peak_pos[2]
         k_peak_pos = [k_peak_pos[1:2]...]
-        for h in 1:imply_higher_orders
+        for h in 1:implied_higher_orders
             k_peak_pos = vcat(k_peak_pos, base_vec .* (h+1))
         end
     end
@@ -175,8 +191,8 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
         peak_phases[p, 2:2+length(rel_corr)-1] .= angle.(rel_corr)
         ideal_magnitudes = isnothing(amp_magnitudes) ? 0.5  : order_strengths_from_amp(amp_magnitudes)[2:end]
         peak_strengths[p, 2:end] .= (ideal_strength) ? ideal_magnitudes : abs.(rel_corr)
-        if (imply_higher_orders > 0)
-            for h in 1:imply_higher_orders
+        if (implied_higher_orders > 0)
+            for h in 1:implied_higher_orders
                 peak_phases[p, h+2] = angle.(rel_corr[1]) * (h+1)
             end
         end
@@ -193,8 +209,6 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
     #     peak_strengths = ones(size(peak_strengths)...)
     # end
 
-    num_photons = 0.0 # ignore this
-    bg_photons = 0.0
     otf_indices = let 
         if (individual_otfs)
             collect(1:length(k_peak_pos))
@@ -206,7 +220,7 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
     k_peak_pos2 = [d for d in k_peak_pos]
     psfsz = size(dat)[1:ndims(dat)-1]
     mypsf = (isnothing(mypsf)) ? delta(psfsz) : mypsf
-    spf = SIMParams(mypsf, num_photons, bg_photons, k_peak_pos2, peak_phases, peak_strengths, otf_indices, otf_phases, otf_exponent);
+    spf = SIMParams(mypsf, k_peak_pos2, peak_phases, peak_strengths, otf_indices, otf_phases, otf_exponent);
     if (show_quality)
         println("conditioning quality of unmxing submatrix is $(1 / cond(weight_matrix(spf))), (1.0 is best)")
     end

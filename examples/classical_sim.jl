@@ -13,14 +13,6 @@ function main()
     pp = PSFParams(lambda, NA, n);  # 532 nm, NA 0.25 in Water n= 1.33
     sampling = (0.06, 0.06, 0.1)  # 100 nm x 100 nm x 200 nm
 
-    # SIM illumination pattern
-    num_directions = 3; num_images =  3*num_directions; num_orders = 2
-    rel_peak = 0.40 # peak position relative to sampling limit on fine grid
-    k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases = generate_peaks(num_images, num_directions, num_orders, rel_peak / (num_orders-1))
-
-    num_photons = 100.00
-    num_photons_bg = 0.0 # 100.0 # background photons
-
     obj = Float32.(testimage("resolution_test_512"));
     obj[(size(obj).÷2 .+1)...] = 2.0 
     if (false)
@@ -28,13 +20,23 @@ function main()
         # obj[257,257] = 1.0
         obj[250,250] = 1.0
     end
+    mypsf = psf(size(obj), pp, sampling=sampling)
+
+    # SIM illumination pattern
+    num_directions = 3; num_phases = 3; num_images =  num_phases*num_directions; num_orders = 2
+    rel_peak = 0.40 # peak position relative to sampling limit on fine grid
+    # k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases = generate_peaks(num_images, num_directions, num_orders, rel_peak / (num_orders-1))
+    # spf = SIMParams(mypsf, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases);
+    spf = generate_peaks_param(mypsf, num_images, num_directions, num_orders, rel_peak / (num_orders-1))
+
+
     # obj[1,1] = 1.0
     # obj = CuArray(obj)
     # obj .= 1f0
     downsample_factor = 2
-    mypsf = psf(size(obj), pp, sampling=sampling)
-    spf = SIMParams(mypsf, num_photons, num_photons_bg, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases);
-    @time sim_data, sp = simulate_sim(obj, spf, downsample_factor);
+    num_photons = 100.00
+    num_photons_bg = 0.0 # 100.0 # background photons
+    @time sim_data, sp = simulate_sim(obj, spf, downsample_factor; n_photons=num_photons, n_photons_bg=num_photons_bg);
     if (use_cuda)
         sim_data = CuArray(sim_data);
     end
@@ -82,13 +84,17 @@ function main()
     @vt ft(obj) ft(recon) ft(recon2) 
 
     if (false) # compare with perfect data to see the noise
-        spf_p = SIMParams(mypsf, 0.0, 0.0, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases);
-        @time sim_data_p, sp_p = simulate_sim(obj, spf_p, downsample_factor);
+        @time sim_data_p, sp_p = simulate_sim(obj, spf, downsample_factor; n_photons=0, n_photons_bg=0);
         sim_data_p = num_photons .* sim_data_p ./ maximum(sim_data_p)
 
-        prep_p = recon_sim_prepare(sim_data_p, sp, rp; use_final_filter=use_final_filter); # do preallocate
+        prep_p = recon_sim_prepare(sim_data_p, sp, rp; use_final_filter=false); # no wiener filtering 
         @time recon_p = recon_sim(sim_data_p, prep_p, sp);
+
+        prep = recon_sim_prepare(sim_data, sp, rp; use_final_filter=false); # no wiener filtering -> constant noise
+        @time recon = recon_sim(sim_data, prep, sp);
+
         # @vt recon recon_p recon.-recon_p
+        # The last image below should show a flat noise spectrum, if use_final_filter=false
         @vt ft(obj) ft(recon) ft(recon_p) ft(recon.-recon_p)
     end
 

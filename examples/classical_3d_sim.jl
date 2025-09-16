@@ -15,6 +15,8 @@ function main()
     pp = PSFParams(lambda, NA, n);  # 532 nm, NA 0.25 in Water n= 1.33
     sampling = (0.05, 0.05, 0.08)  # sampling in the orginal (high-res.) simulation grid. Should be at least twice as good as needed along XY.
     obj_sz = (512, 512, 128)
+    obj = filaments3D(Float32, obj_sz);
+    mypsf = psf(obj_sz, pp; sampling=sampling)
     downsample_factor = 2 # is only applied in XY, not in Z
     # detection_sz = (obj_sz[1] ÷ downsample_factor, obj_sz[2] ÷ downsample_factor, obj_sz[3]) # size of the detection grid
 
@@ -25,15 +27,10 @@ function main()
     num_directions = 3; num_orders = 3; num_images =  (1 + 2*(num_orders-1))*num_directions; 
     rel_peak = 0.1879 # peak position relative to sampling limit on fine grid
     k1z = get_kz(pp, sampling, rel_peak)
-    k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases = generate_peaks(num_images, num_directions, num_orders, rel_peak / (num_orders-1), true, k1z)
-    # obj = filaments3D(Float32, (128, 128, 128));
-    obj = filaments3D(Float32, obj_sz);
+    spf = generate_peaks_params(mypsf, num_images, num_directions, num_orders, rel_peak / (num_orders-1), true, k1z)
 
     num_photons = 100.0
-    mypsf = psf(obj_sz, pp; sampling=sampling)
-    spf = SIMParams(mypsf, num_photons, 100.0, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases)
-
-    @time sim_data, sp = simulate_sim(obj, spf, downsample_factor);
+    @time sim_data, sp = simulate_sim(obj, spf, downsample_factor; n_photons=num_photons);
 
     if (use_cuda)
         sim_data = CuArray(sim_data);
