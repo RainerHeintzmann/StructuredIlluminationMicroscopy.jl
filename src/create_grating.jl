@@ -58,6 +58,7 @@ function save_grating_im(path, num_phase, dim_slm, para_set; circle_rad=-1, name
     save(joinpath(path, "bright.$form"), bright_img)
 
     img = nothing
+    all_img = [];
     for phase_nr in 0:num_phase-1
         grat = generate_grating(para_set[3:6], phase_nr, num_phase; dim_slm=dim_slm, method=method, blaze=blaze)
 
@@ -88,8 +89,9 @@ function save_grating_im(path, num_phase, dim_slm, para_set; circle_rad=-1, name
             return
         end
         save(joinpath(path, name), img)
+        push!(all_img, transpose(img))
     end
-    return transpose(img)
+    return cat(all_img..., dims=3)
 end
 
 """
@@ -188,6 +190,7 @@ function create_grating(para_path, save_grat_folder; dim_slm=(2048,1536), circle
     end
 
     img = nothing
+    all_img = [];
     # Save gratings
     for i in 1:size(Paras,1)
         p = Paras[i,:]
@@ -195,9 +198,10 @@ function create_grating(para_path, save_grat_folder; dim_slm=(2048,1536), circle
         @info "Parameters: $p"
         img = save_grating_im(save_grat_folder, NumPhases, dim_slm, p; circle_rad=circle_aperture_radius, name_ext=name_tag, 
                         test_grating_shift=test_grating_shift, bitdepth=bitdepth, form=form, val=val, method=method, blaze=blaze_val, func=func)
+        push!(all_img, img)
     end
     writedlm(joinpath(save_grat_folder, "Blaze_info.txt"), blaze_vec)
-    return img  # blaze_vec
+    return cat(all_img..., dims=5)  # blaze_vec
 end
 
 # You will need to implement or adapt:

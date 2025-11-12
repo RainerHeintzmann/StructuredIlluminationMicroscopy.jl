@@ -1,5 +1,6 @@
 # a 3-color example generating SLM-based sim gratings optimized to fit trough holes in a mask 
 using StructuredIlluminationMicroscopy
+using View5D
 
 # desired period: 3.3106957351330344
 path = raw"examples\\"
@@ -59,24 +60,28 @@ pl = create_grating_param_file(path; start=start, stop=stop,
 # grating = StructuredIlluminationMicroscopy.generate_grating(pl[1].opt_para, myphase, num_phase; dim_slm=dim_slm, method="binary", blaze=0, periods=1, binary_threshold=0)
 
 save_grat_folder = path * "gratings"  
-to_read = path * "para_4.032_3phases_3Dir.txt"  
-grating = create_grating(to_read, save_grat_folder; dim_slm=dim_slm, circle_aperture_radius=-1, name_tag="", 
+to_read = path * "para_4.032_$(num_phase)phases_$(num_dir)Dir.txt"  
+
+gratings = create_grating(to_read, save_grat_folder; dim_slm=dim_slm, circle_aperture_radius=-1, name_tag="", 
                         test_grating_shift=false, bitdepth=1, form="png", val="max", method="binary", version=2,
                         blaze_vec=nothing, func=1)
 
+@vv gratings
                         
-ps = pl[1]
-start_dir = 0.0
-period = StructuredIlluminationMicroscopy.get_first_period(ps)
-wanted_mask, unwanted_mask = StructuredIlluminationMicroscopy.generate_mask(3, start_dir, dim_slm, h, wl[1], period, pxs; f=f)
-@ve wanted_mask unwanted_mask
+if (false) # only for debugging:
+    ps = pl[1]
+    start_dir = 0.0
+    period = StructuredIlluminationMicroscopy.get_first_period(ps)
+    wanted_mask, unwanted_mask = StructuredIlluminationMicroscopy.generate_mask(3, start_dir, dim_slm, h, wl[1], period, pxs; f=f)
+    @ve wanted_mask unwanted_mask
 
-# Now we can create the grating
+    # Now we can create the grating
 
-# Now we can find the grating
-grating_found = find_grating(grating, para, dim_slm, bfp_fill=bfp_fill, wavelength=wl[1], phase_nr=1, blaze=0.0);
+    # Now we can find the grating
+    # grating_found = find_grating(grating, para, dim_slm, bfp_fill=bfp_fill, wavelength=wl[1], phase_nr=1, blaze=0.0);
 
-# Now we can check the grating
-check_phase_steps(grating_found, para, dim_slm, bfp_fill=bfp_fill, wavelength=wl[1], phase_nr=1, blaze=0.0);
+    # Now we can check the grating
+    check_phase_steps(grating_found, para, dim_slm, bfp_fill=bfp_fill, wavelength=wl[1], phase_nr=1, blaze=0.0);
 
-# Now we can optimize the grating sum
+    # Now we can optimize the grating sum
+end
