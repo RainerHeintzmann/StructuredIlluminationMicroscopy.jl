@@ -66,7 +66,7 @@ end
 
 Preprocesses the data for SIM analysis by subtracting a background value and normalizing the data.
 """
-function preprocess_sim(dat; bg = 100f0, num_directions=nothing, reg_const=1e-6, correct_drift=true, enforce_mean=true, verbose=false, damp_edge=true)
+function preprocess_sim(dat; bg = 100f0, num_directions=nothing, reg_const=2f0, correct_drift=true, enforce_mean=true, verbose=false, damp_edge=true)
     dat = dat .- bg # copies
     # correct slice brightness fluctuations
     dat .*= mean(dat) ./ mean(dat, dims=(1:ndims(dat)-1))
@@ -74,7 +74,9 @@ function preprocess_sim(dat; bg = 100f0, num_directions=nothing, reg_const=1e-6,
     if (damp_edge)
         # dat .*= window_hanning(size(dat)[1:ndims(dat)-1], border_in=0.97)
         for slice in eachslice(dat, dims=ndims(dat))
-            ns = FindShift.damp_edge_outside(select_region(slice, ceil.(Int, size(slice) .* 0.97)), 0.03)
+            smaller_sz = ceil.(Int, size(slice) .* 0.97)
+            rel_sz = (size(slice) .- smaller_sz) ./ smaller_sz
+            ns = FindShift.damp_edge_outside(select_region(slice, smaller_sz), rel_sz)
             slice .= ns;
         end
     end
@@ -89,7 +91,7 @@ function preprocess_sim(dat; bg = 100f0, num_directions=nothing, reg_const=1e-6,
             for d in 1:num_directions
                 sub_data = slice(dat, ndims(dat), (d-1)*num_phases+1:d*num_phases)
                 sub_mean = mean(sub_data, dims=ndims(sub_data))
-                sub_data .*= all_mean .* sub_mean ./ (abs2.(sub_mean) .+ reg_const)
+                sub_data .*= all_mean .* sub_mean ./ (abs2.(sub_mean) .+ abs2(reg_const))
             end
         end
     end

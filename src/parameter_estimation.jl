@@ -128,6 +128,11 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
         corr_psf = mypsf ./ sum(mypsf) # let
         corr_otf = fft(corr_psf)
         # modify the PSF to suppress the low frequencies, if wanted
+        if ndims(corr_otf) > 2
+            corr_otf = @view corr_otf[:,:,1]
+            midz = size(corr_psf,3) ÷ 2 + 1
+            corr_psf = @view corr_psf[:,:,midz]
+        end
         shift_x = (angle(-corr_otf[2,1])) .* size(corr_otf,1) / 2pi
         shift_y = (angle(-corr_otf[1,2])) .* size(corr_otf,2) / 2pi
 

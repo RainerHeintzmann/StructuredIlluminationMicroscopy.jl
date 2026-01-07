@@ -16,6 +16,7 @@ end
 
 Separate the orders in the SIM data and apply subpixel shifts in real space. 
 Each separated order is immediately placed (added) in Fourier space into the final result image.
+Except for the zero order, also the corresponding flipped complex-conjugate is added into the result rft-space.
 
 Parameters:
 + `sim_data::Array` : simulated SIM data
@@ -70,13 +71,15 @@ function separate_and_place_orders(sim_data, sp::SIMParams, prep)
 
         # @show maximum(imag.(order))
 
-        # write the order into the result rft image
+        # write (add) the order into the result rft image rec
         select_region!(myftorder, rec; dst_center = bctr .+ ordershift[1:ndims(rec)], operator! = add!)
 
-        # write the flipped and conjugated order into the result rft image. Except for the zero order, which is written only once
+        # write (add) the flipped and conjugated order into the result rft image. Except for the zero order, which is written only once
         if (n>1)
+            # realize a flipped view (all directions) via backward range-indexing
             idsbwd = ntuple(d-> (size(myftorder, d):-1:1), ndims(myftorder))
             bwd_v = @view myftorder[idsbwd...]
+            # the conjugation is directly applied in the addition operation
             select_region!(bwd_v, rec; dst_center = bctrbwd .- ordershift[1:ndims(rec)], operator! = conj_add!)
         end
     end
@@ -119,7 +122,7 @@ function get_otfs(ACT, sz, sp::SIMParams, use_rft = false)
     for i in eachindex(otfs)
         kz = pi*sp.k_peak_pos[i][3]
         if (kz != 0.0) # shift to +/- kz position and account for the z-related misadjustment via peak_phase:
-            hm = mypsf .* cos.(pz .* kz .+ sp.peak_phases[i])
+            hm = mypsf .* cos.(pz .* kz .+ sp.peak_phases[i]); # Division by two to account for zero order(s) being twice as strong
         end
         myotf = (use_rft) ? rfft(ifftshift(hm)) : fftshift(fft(ifftshift(hm)))
         otfs[i] = myotf
@@ -143,6 +146,8 @@ end
 
 Generate the OTFs for the SIM reconstruction by first simulating a PSF and then (optionally)
 creating according to sp.otf_indices the z-modified OTFs for the SIM reconstruction.
+Also notch-filter modifications are performed (if rp.notch exists).
+Returns: vectors of all otfs, all otf masks, all subpixel shifters and all pixelshifts.
 The finally returned OTFs correspond to the peak numbering (not the indices in `sp.otf_indices`).
 
 Parameters:
@@ -155,9 +160,24 @@ Parameters:
 + `do_modify` : modify the OTFs with an additional suppression filter
 + `otf_threshold` : threshold to avoid division by zero in the Wiener filter, default is 0.002
 
+Returns a tuple of:
++ `all_weights`: a list of weights to apply to each subpixel preshifted and separated order in Fourier space
+    These are then stored in prep.otfs
++ `all_masks`: a corresponding list of all masks.
++ `all_shifters`: Separable arrays to perform the subpixel shifts by multiplication in real space (after order separation)
+    These are then stored in prep.subpixel_shifters
++ `all_pixelshifts`: Vector of Tuple{Int,Int,Int} of full pixel shifts to apply in FOurierspace to the (subpixel-) preshifted separated orders 
+    These are then stored in prep.pixelshifts
 """
 function get_modified_otfs(ACT, sz, sp::SIMParams, rp, use_rft = false; do_modify=false, otf_threshold=0.001)
+    # obtain the otf for each psf in sp. This is not the list of otfs for each separated order!
     otfs = get_otfs(ACT, sz, sp, use_rft)
+
+    # for n=1:length(otfs) # just for debug purposes
+    #     otfs[n] .*= 0;
+    #     otfs[n] .+= rr(size(otfs[1])) .< size(otfs[1],1)/2;
+    # end
+
     # @show order_vars =  get_sep_order_variances(sp)    
     # otfs ./= sqrt.(order_vars) # square the OTFs to account for the weighting with the inverse variance after compensation of the OTF
     if (do_modify == false) # just to see if this flag can be removed in the future
@@ -193,28 +213,43 @@ function get_modified_otfs(ACT, sz, sp::SIMParams, rp, use_rft = false; do_modif
         end
     end
 
-    all_weights = Array{ACT}(undef, length(sp.k_peak_pos))
+    num_orders = length(sp.k_peak_pos)
+    num_phases = size(sp.peak_strengths, 1)
+    all_weights = Array{ACT}(undef, num_orders)
     ART = real_arr_type(ACT) 
-    all_masks = Array{ART}(undef, length(sp.k_peak_pos))
+    all_masks = Array{ART}(undef, num_orders)
+    all_shifters = Vector{Any}(undef, num_orders)
+    all_pixelshifts = Array{NTuple{3, Int}}(undef, num_orders)
+
+    # estimate the relative noise variance of each unmixed order via error propagation
+    order_noise_var = abs2.(pinv_weight_matrix(sp)) * ones(num_phases)
 
     for i in eachindex(sp.k_peak_pos)
         if (rp.preshift_otfs)
             ordershift = .-sp.k_peak_pos[i] .* expand_size(sz, ntuple((d)->1, length(sp.k_peak_pos[i]))) ./ 2
-            myshifter, _ = get_shift_subpixel(psfs[sp.otf_indices[i]], ordershift)
+            myshifter, pixelshift = get_shift_subpixel(psfs[sp.otf_indices[i]], ordershift)
             mypsf = psfs[sp.otf_indices[i]] .* myshifter
             myotf = (use_rft) ? rfft(ifftshift(mypsf)) : fftshift(fft(ifftshift(mypsf)))
-            all_weights[i] = myotf  
-            all_masks[i] = get_otf_mask(myotf, rp.otf_radius; otf_threshold=otf_threshold) # mask to avoid division by zero
+
+            all_pixelshifts[i] = pixelshift
+            all_shifters[i] = myshifter
         else
             myotf = otfs[sp.otf_indices[i]]
-            all_weights[i] = myotf 
-            all_masks[i] = get_otf_mask(myotf, rp.otf_radius; otf_threshold=otf_threshold)
         end
+        # scale the OTFs of the separated orders by the std.dev. of the noise
+        if (i == 1)
+            # the factor of 2 below accounts for the fact that all orders except for the zero order 
+            # are added twice and (at least for sequential acquisition), the zero order is always present.
+            all_weights[i] = myotf .* eltype(myotf)(2 *(num_orders-1)*sqrt.(order_noise_var[i]))
+        else
+            all_weights[i] = myotf .* eltype(myotf)(sqrt.(order_noise_var[i]))
+        end
+        all_masks[i] = get_otf_mask(myotf, rp.otf_radius; otf_threshold=otf_threshold) # mask to avoid division by zero
     end
 
     # otf_masks = [abs.(otf) .> maximum(abs.(otf)) * otf_threshold for otf in otfs] # mask to avoid division by zero
     
-    return all_weights, all_masks
+    return all_weights, all_masks, all_shifters, all_pixelshifts
 end
 
 
@@ -265,18 +300,31 @@ function pre_allocate!(sim_data, prep, rp)
 end
 
 """
-    normalize_otfs(otfs keep_hf = false, otf_thresh = 0.002)
+    normalize_otfs!(prep, rp; keep_hf = false, otf_thresh = 0.002)
 
-Each OTF is normalized such that the sum of abs square values after shifting the other OTFs amounts to one.
-This guarantees that the noise will still be flat after applying these OTFs as filters (k-dependent weights) to each separated order.
+Each OTF is normalized such that the sum of abs square values over all OTFs after shifting amounts to one.
+Since noise adds in quadrature, this guarantees that the noise will still be flat after applying these OTFs
+as filters (multiplication in Fourier space, i.e. k-dependent weights) to each separated order.
+
+The separated orders (preshifted by subpixel amounts) will be multiplied by
+the functions returned by the OTFs (one for each order) contained in the prep structure.
+These are normalized such that the final sum of fully shifted separated orders has a uniform (frequency-independent)
+noise structure.
+The underlying assumption this normalization of the sum of squared (shifted OTFs) is that the incoming separated orders
+each have a uniform noise spectrum of identical noise strength. 
+The frequency independent noise structure will be true for any separation matrix, but identical noise amounts
+should only be the case for unitary separation matrices (i.e. equal phase steps).
 
 Parameters:
-+ `all_otfs::Array` : array of OTFs
-+ `shift_vecs::Array` : array of shift vectors for each OTF
-+ `keep_hf::Bool` : whether to keep the high-frequency components of the OTFs (default: false)
++ `prep.otfs::Vector`: array of OTFs
++ `prep.subpixel_shifters::Vector`: shubpixels shift matrices 
++ `prep.pixelshifts::Vector`: pixelshifts for the corresponding OTFs
+# `rp`: reconstruction parameters. Only rp.otf_radius is needed.
++ `keep_hf::Bool`: whether to keep the high-frequency components of the OTFs (default: false)
++ `otf_thresh`: threshold under which OTFs are not accounted for
 
 """
-function normalize_otfs!(prep; keep_hf = false, otf_masks=nothing, otf_thresh = 0.004)
+function normalize_otfs!(prep, rp; keep_hf = false, otf_masks=nothing, otf_thresh = 0.004)
     if isnothing(otf_masks)
         otf_masks = [get_otf_mask(myotf, rp.otf_radius; otf_threshold=otf_thresh) for myotf in prep.otfs]
     end
@@ -288,25 +336,37 @@ function normalize_otfs!(prep; keep_hf = false, otf_masks=nothing, otf_thresh = 
         otf .= augment_otf(otf, otf_mask) # will the automatically be contributing only in regions of single otfs
     end
 
-    all_psfs = [fftshift(ifft(ifftshift(otf))) for otf in prep.otfs] # the psfs are used to calculate the subpixel shifts, so they need to be in real space;
+    # Note: The otfs are already subpixel shifted in Fourier space, which means that the corresponding psfs have phase slopes
+    # Since we normalize the weights, via a sum of the absolute square weights of all other orders overlapping
+    # with the currently considered order (outer loop), we already undo the individual suppixel shifts in the corresponding PSFs.
+    all_psfs = [conj.(prep.subpixel_shifters[n]) .* fftshift(ifft(ifftshift(otf))) for (otf, n) in zip(prep.otfs, eachindex(prep.subpixel_shifters))] # the psfs are used to calculate the subpixel shifts, so they need to be in real space;
     sum_otfs2 = similar(prep.otfs[1]) # abs2.(otf)
-    sqr(x) = x .* x
+    # sqr(x) = x .* x
     for (otf, otf_mask, otf_num) in zip(prep.otfs, otf_masks, eachindex(prep.otfs))
-        sum_otfs2 .= eltype(otf)(0) # zero the sum
+        sum_otfs2 .= zero(eltype(otf)) # zero the sum
         mid_pos = size(otf) .÷ 2 .+ 1
         ref_shifter = prep.subpixel_shifters[otf_num]
+        # shift all OTFS to the coordinate system of the currently processed OTF via a phase modification of the psf
+        # this would mean invert the subpixel shift and apply the new one and the crop with the integer pixel difference.
+        # Since the individual subpixel shift has already been removed, we only need to apply the subpixel shift to the current OTF position.
+        # as stored in ref_shifter
         for (mypsf, psf_num) in zip(all_psfs, eachindex(all_psfs))
+            # only integer pixel shifts
             rel_shift = prep.pixelshifts[otf_num] .- prep.pixelshifts[psf_num] 
-            sum_otfs2 .+= select_region(sqr.(fftshift(fft(ifftshift(conj.(prep.subpixel_shifters[psf_num]) .* ref_shifter .* mypsf)))); center = mid_pos .+ rel_shift[1:length(mid_pos)])
+            # This applies to the central and all other orders:
+            reshifted_psf = ref_shifter.*mypsf
+            sum_otfs2 .+= select_region(abs2.(fftshift(fft(ifftshift(reshifted_psf)))); center = mid_pos .+ rel_shift[1:length(mid_pos)])
             # sum_otfs2 .+= select_region(sqr.(fftshift(fft(ifftshift((conj.(mypsf)))))); center = mid_pos .+ rel_shift[1:length(mid_pos)])
-            # the central order is only added once and also the noise scales differently without a shift            
-            if (psf_num != otf_num) # (norm(rel_shift) > 0)
+            # the central order is only added once and also the noise scales differently without a shift
+            if (psf_num !== 1) # (psf_num != otf_num) # (norm(rel_shift) > 0)
+                # only integer pixel shifts
                 rel_shift = prep.pixelshifts[otf_num] .+ prep.pixelshifts[psf_num]
-                sum_otfs2 .+= select_region(sqr.(fftshift(fft(ifftshift((prep.subpixel_shifters[psf_num] .* ref_shifter .* conj.(mypsf)))))); center = mid_pos .+ rel_shift[1:length(mid_pos)])
+                sum_otfs2 .+= select_region(abs2.(fftshift(fft(ifftshift((conj.(reshifted_psf)))))); center = mid_pos .+ rel_shift[1:length(mid_pos)])
                 # sum_otfs2 .+= select_region(sqr.(fftshift(fft(ifftshift(mypsf)))); center = mid_pos .+ rel_shift[1:length(mid_pos)])
             end
             # sum_otfs2 .+= select_region(abs2.(fftshift(fft(ifftshift(mypsf)))); center = mid_pos .+ rel_shift[1:length(mid_pos)])
         end
+        # we can already apply inside the main loop, as the OTFs are not accessed in the inner loop, only the corresponding psfs, which are copies
         if (keep_hf)
             # not clear, why this augementation here is bad:
             # otf = augment_otf(otf, otf_mask) # keep the high-frequency components
@@ -317,7 +377,7 @@ function normalize_otfs!(prep; keep_hf = false, otf_masks=nothing, otf_thresh = 
             otf ./= sqrt.(sum_otfs2) # guarantees the noise to be constant
             # otf .= sum_otfs_mask
         else
-            om = otf_mask .> 1e-5
+            om = otf_mask .> 1f-5
             otf[om] ./= sqrt.(sum_otfs2[om]) # guarantees the noise to be constant
             otf[.~om] .= 0 # guarantees the noise to be constant
         end
@@ -373,7 +433,7 @@ function recon_sim_prepare(sim_data, sp::SIMParams, rp::ReconParams; use_final_f
         prep.upsample_factor = rp.upsample_factor
 
         # construct the modified reconstruction OTF
-        prep.otfs, otf_masks = get_modified_otfs(ACT, sz[1:end-1], sp, rp; do_modify=true)
+        prep.otfs, otf_masks, prep.subpixel_shifters, prep.pixelshifts = get_modified_otfs(ACT, sz[1:end-1], sp, rp; do_modify=true)
 
         # calculate the pseudo-inverse of the weight-matrix constructed from the information in the SIMParams object
         prep.pinv_weight_mat = pinv_weight_matrix(sp)
@@ -383,37 +443,25 @@ function recon_sim_prepare(sim_data, sp::SIMParams, rp::ReconParams; use_final_f
         prep.order =  similar(sim_data, CT, imsz...)
         prep.plan_fft! = (rp.use_measure) ? plan_fft!(prep.order, flags=FFTW.MEASURE) : plan_fft!(prep.order)
 
-        num_orders = size(sp.peak_phases,2)
-        prep.pixelshifts = Array{NTuple{3, Int}}(undef, num_orders)
-        prep.subpixel_shifters = Vector{Any}(undef, num_orders)
-
-        for n in 1:num_orders
-            ordershift = .-sp.k_peak_pos[n] .* expand_size(imsz, ntuple((d)->1, length(sp.k_peak_pos[n]))) ./ 2
-            # ordershift = shift_subpixel!(order, ordershift, prep, n)
-            prep.subpixel_shifters[n], prep.pixelshifts[n] = get_shift_subpixel(prep.order, ordershift)
-        end
-        normalize_otfs!(prep; otf_masks=otf_masks, keep_hf = rp.keep_hf)
-        # @show order_vars =  get_sep_order_variances(sp)    
-        # prep.otfs ./= sqrt.(order_vars) # square the OTFs to account for the weighting with the inverse variance after compensation of the OTF
-
-        # prepd = (otfs= myotfs, upsample_factor=rp.upsample_factor, plan_irfft=myplan_irfft, plan_fft! =myplan_fft!, pinv_weight_mat=myinv,
-        #         subpixel_shifters=subpixel_shifters, pixelshifts=pixelshifts, slice_by_slice=rp.slice_by_slice)
+        normalize_otfs!(prep, rp; otf_masks=otf_masks, keep_hf = rp.keep_hf)
 
         if (rp.do_preallocate)
             pre_allocate!(sim_data, prep, rp)
         end
 
         dobj = collect(delta(eltype(sim_data), size(sim_data)[1:end-1]))  # , offset=CtrFFT)
-        # simulate the noise-free sim data of a single delta peak to obtain the SIM PSF to be used for constructing the inverse.
+        
+        if (! rp.do_deconvolve && !use_final_filter)
+            GC.gc();
+            return prep
+        end
+        # simulate the noise-free sim data of a single delta peak to obtain the SIM PSF to be used for the final Wiener-filter step and/or deconvolution.
         sim_delta, _ = simulate_sim(dobj, sp);
         ART = typeof(sim_data)
         sim_delta = ART(sim_delta)
-
         rec_delta = recon_sim(sim_delta, prep, sp)
 
         # calculate the final filter
-        # rec_otf = ft(rec_delta)
-        # rec_otf = fftshift(fft(ifftshift(rec_delta)))
         rec_otf = fftshift(fft(rec_delta))
         rec_otf ./= maximum(abs.(rec_otf))
 
@@ -442,21 +490,6 @@ function recon_sim_prepare(sim_data, sp::SIMParams, rp::ReconParams; use_final_f
         else
             prep.final_filter = ACT(ones(size(prep.result_rft))) # no final filter
         end
-
-        # the algorithm needs preallocated memory:
-        # order: Array{ACT}(undef, size(sim_data)[1:end-1]..., size(sp.peak_phases, 2))
-        # result_image: Array{ACT}(undef, size(sim_data)[1:end-1])
-        
-        # if (rp.do_preallocate)
-        #     prep = (otfs = myotfs, upsample_factor=rp.upsample_factor, final_filter=final_filter, plan_irfft=myplan_irfft, plan_fft! =myplan_fft!,
-        #         subpixel_shifters=subpixel_shifters, pixelshifts=pixelshifts, pinv_weight_mat=myinv,
-        #             result_rft=prepd.result_rft, order=prepd.order, ftorder=prepd.ftorder, result=prepd.result,
-        #             result_rft_tmp=prepd.result_rft_tmp, slice_by_slice=rp.slice_by_slice) # result_tmp=prepd.result_tmp, 
-        # else
-        #     prep = (otfs = myotfs, final_filter=final_filter, 
-        #     subpixel_shifters=subpixel_shifters, pixelshifts=pixelshifts, pinv_weight_mat=myinv,
-        #     upsample_factor=rp.upsample_factor, plan_irfft=myplan_irfft, plan_fft! =myplan_fft!, slice_by_slice=rp.slice_by_slice)
-        # end
     end
 
     GC.gc();

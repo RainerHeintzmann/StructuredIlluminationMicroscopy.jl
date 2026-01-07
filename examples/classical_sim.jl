@@ -83,7 +83,7 @@ function main()
     @vt recon recon2 
     @vt ft(obj) ft(recon) ft(recon2) 
 
-    if (false) # compare with perfect data to see the noise
+    if (false) # compare with perfect data to see the noise spectrum
         @time sim_data_p, sp_p = simulate_sim(obj, spf, downsample_factor; n_photons=0, n_photons_bg=0);
         sim_data_p = num_photons .* sim_data_p ./ maximum(sim_data_p)
 

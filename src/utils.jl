@@ -8,7 +8,10 @@ Parameters:
 
 """
 function weight_matrix(sp::SIMParams)
-    return cis.(sp.peak_phases) .* sp.peak_strengths
+    wm = cis.(sp.peak_phases) .* sp.peak_strengths
+    tint = abs(sum(wm[:,1]))
+    # normalize the forward model to preserve the total intensity of the source
+    return wm ./ tint
 end
 
 """
@@ -33,10 +36,15 @@ end
     correct_pinv_weight_matrix(mypinv)
 
 modifies the pseudo inverse unmixing matrix such that the result is equal variance normalized.
+This considers the error propagation rules involving the elementwise abs2 of the matrix 
+as a matrix applied to equal brightness data.
+However, as a global scale factor this is still further normalized to conserve the over all photon number
+for the unmixed zero order (at the center).
 """
 function correct_pinv_weight_matrix(mypinv)
     res_variances = abs2.(mypinv) * ones(size(mypinv, 2))
-    return mypinv ./ sqrt.(res_variances) # return the variances of the orders
+    pinv_var_normed = mypinv ./ sqrt.(res_variances) # return the variances of the orders
+    return pinv_var_normed / mean(pinv_var_normed[1,:])
 end
 
 """
@@ -263,6 +271,20 @@ Parameters:
 """
 function add!(dst, src)
     dst .+= src
+end
+
+"""
+    addmul2!(dst, src)
+
+add 2*`src` to `dst` in place.
+
+Parameters:
++ `dst` : destination array
++ `src` : source array
+
+"""
+function addmul2!(dst, src)
+    dst .+= 2*src
 end
 
 """
