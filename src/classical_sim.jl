@@ -546,7 +546,7 @@ function recon_sim(sim_data, prep, sp::SIMParams)
         rifftshift!(res_tmp, res)
         result = prod(size(prep.result))>1 ? prep.result : similar(sim_data, eltype(sim_data), bsz...)
         result .= irfft(res_tmp,  bsz[1])       # fftshift(irfft(res_tmp,  bsz[1])) 
-        iterations = 8
+        iterations = 16
         @info "deconvolving with rec_otf, iterations: $iterations"
         # result, o = deconvolution(result, mypsf, regularizer=TH(), λ=0.0001, loss=Anscombe(100f0));
         # result, o = deconvolution(result, mypsf, regularizer=TH(), mapping=nothing, λ=prep.deconv_lambda, loss=Gauss());

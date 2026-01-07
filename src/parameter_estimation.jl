@@ -127,6 +127,13 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
     if !isnothing(mypsf)
         corr_psf = mypsf ./ sum(mypsf) # let
         corr_otf = fft(corr_psf)
+        was_modified = false
+        if (otf_exponent != 1.0)
+            corr_otf .= cis.(angle.(corr_otf)) .* (abs.(corr_otf) .^ otf_exponent)
+            mypsf = real.(ifft(corr_otf))
+            mypsf = mypsf ./ sum(mypsf) # let
+            was_modified = true
+        end
         # modify the PSF to suppress the low frequencies, if wanted
         if ndims(corr_otf) > 2
             corr_otf = @view corr_otf[:,:,1]
@@ -136,11 +143,6 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
         shift_x = (angle(-corr_otf[2,1])) .* size(corr_otf,1) / 2pi
         shift_y = (angle(-corr_otf[1,2])) .* size(corr_otf,2) / 2pi
 
-        was_modified = false
-        if (otf_exponent != 1.0)
-            corr_otf .*= cis.(angle.(corr_otf)) .* (abs.(corr_otf) .^ otf_exponent)
-            was_modified = true
-        end
         if (abs(shift_x) > 0.05 || abs(shift_y) > 0.05)
             @warn "The PSF is significantly asymmtric or shifted by $(shift_x), $(shift_y).\nThis may lead to problems in the estimation. Trying to correct shift"
             shifter = ifftshift(exp_ikx_col(typeof(corr_otf), size(corr_otf), shift_by=(shift_x, shift_y)))
