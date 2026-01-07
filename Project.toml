@@ -1,7 +1,7 @@
 name = "StructuredIlluminationMicroscopy"
 uuid = "a7ea9a99-8dd4-4c38-9d41-c34fb0fe62c4"
 authors = ["Rainer Heintzmann"]
-version = "0.2.0"
+version = "0.3.0"
 
 [deps]
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
