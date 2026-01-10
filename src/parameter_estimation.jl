@@ -3,7 +3,7 @@
     function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
                             subtract_mean=true, upsample=false, suppress_sigma=0.0, 
                             num_directions=0, ideal_strength=true, implied_higher_orders=0,
-                            otf_exponent = 1.0, amp_magnitudes=nothing, individual_otfs=false, show_quality=true)
+                            otf_exponent = 1.0, otf_moebius = 1.0, amp_magnitudes=nothing, individual_otfs=false, show_quality=true)
 
 Estimate the parameters for a SIM image from the experimatal data. This function is used to estimate the parameters for the SIM image from the experimental data. The function uses the experimental data to estimate the parameters for the SIM image.
 The function returns the estimated parameters for the SIM image.
@@ -20,6 +20,8 @@ The function returns the estimated parameters for the SIM image.
 - `ideal_strength`: If true, the strength of the peaks is set to 1. Default is true.
 - `implied_higher_orders`: If not zero, this specifies the number of higher orders which are implied from the first order. Default is 0.
 - `amp_magnitudes`: Optional parameter to specify the magnitudes of the amplitudes of the peaks. If `nothing`, the amplitudes are estimated from the data.
+- `otf_moebius`: A moebius-polynomial fraction based OTF modification, to use similar as otf_exponent. Default is 1.0.
+    It has a different performance particularly at high frequencies suppressing them not as strongly.
 - `otf_exponent`: The exponent to use for the OTF. Default is 1.0.
 - `individual_otfs`: If true, the function will estimate individual OTFs for each direction. Default is false.
 - `show_quality`: If true, the function will print the conditioning quality of the unmixing matrix. Default is true.
@@ -34,7 +36,7 @@ The function returns the estimated parameters for the SIM image.
 function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
                             subtract_mean=true, upsample=false, suppress_sigma=0.15, 
                             num_directions=0, ideal_strength=true, implied_higher_orders=0,
-                            otf_exponent = 1.0, amp_magnitudes=nothing, individual_otfs=false,
+                            otf_exponent = 1.0, otf_moebius = 1.0, amp_magnitudes=nothing, individual_otfs=false,
                             show_quality=true, notch_filter=nothing, verbose=true, phase_only=false)
     if num_directions > 0
         num_phases = size(dat, ndims(dat)) ÷ num_directions;
@@ -55,7 +57,7 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
             spf_sub = estimate_parameters(sub_data, mypsf, refdat; k_vecs=k_vec,  
                                             subtract_mean=subtract_mean, suppress_sigma=suppress_sigma, 
                                             num_directions=0, ideal_strength=ideal_strength, implied_higher_orders=implied_higher_orders,
-                                            amp_magnitudes=amp_magnitudes, otf_exponent=otf_exponent, individual_otfs=individual_otfs,
+                                            amp_magnitudes=amp_magnitudes, otf_exponent=otf_exponent, otf_moebius = otf_moebius, individual_otfs=individual_otfs,
                                             show_quality=show_quality, notch_filter=notch_filter, verbose=verbose, phase_only=phase_only)
             if (d == 1)
                 spf = spf_sub
@@ -128,8 +130,21 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
         corr_psf = mypsf ./ sum(mypsf) # let
         corr_otf = fft(corr_psf)
         was_modified = false
-        if (otf_exponent != 1.0)
-            corr_otf .= cis.(angle.(corr_otf)) .* (abs.(corr_otf) .^ otf_exponent)
+        if (otf_moebius != 1 || otf_exponent != 1)
+            # gamma = 0.5;x=0:0.01:1; plot(moebius.(x, 1/gamma), label="moebius γ=$(gamma)"); plot!(x.^gamma, label="exp γ=$(gamma)")
+            # gamma = 2;x=0:0.01:1; plot!(moebius.(x, 1/gamma), label="moebius γ=$(gamma)"); plot!(x.^gamma, label="exp γ=$(gamma)")
+            # gamma = 1;x=0:0.01:1; plot!(moebius.(x, 1/gamma), label="moebius γ=$(gamma)")
+            # xlabel!("input"); ylabel!("output"); title!("Moebius vs. Expontial Gamma Correction")
+            if (otf_moebius != 1)
+                old_mag = abs.(corr_otf);
+                gamma = 1/otf_moebius;  # to make it behave like the exponential gamma
+                moebius(old_mag, gamma) = gamma*old_mag/(1+(gamma-1)*old_mag)
+                corr_otf .= cis.(angle.(corr_otf)) .* moebius.(old_mag, gamma)
+            end
+            if (otf_exponent != 1)
+                new_mag = abs.(corr_otf) .^ otf_exponent
+                corr_otf .= cis.(angle.(corr_otf)) .* new_mag
+            end
             mypsf = real.(ifft(corr_otf))
             mypsf = mypsf ./ sum(mypsf) # let
             was_modified = true
