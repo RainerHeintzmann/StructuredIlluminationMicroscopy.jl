@@ -87,6 +87,25 @@ function separate_and_place_orders(sim_data, sp::SIMParams, prep)
 end
 
 """
+    just_separate(sim_data, sp::SIMParams, prep)
+
+A routine that separates all orders just for diagnostic purposes.
+"""
+function just_separate(sim_data, sp::SIMParams, prep)
+    RT = eltype(sim_data)
+    CT = Complex{RT}
+    imsz = size(sim_data)[1:end-1]
+
+    prep.pinv_weight_mat = prod(size(prep.pinv_weight_mat))>1 ? prep.pinv_weight_mat : pinv_weight_matrix(sp)
+    num_orders = size(sp.peak_phases, 2)
+    orders = similar(sim_data, CT, imsz..., num_orders)
+    for (n, order) in zip(1:num_orders, eachslice(orders, dims=ndims(sim_data)))
+        dot_mul_last_dim!(order, sim_data, prep.pinv_weight_mat, n);
+    end
+    return orders
+end
+
+"""
     get_otfs(ACT, sz, sp::SIMParams, use_rft = false, slice_by_slice=false)
 
 Generate the OTFs for the SIM reconstruction from PSFs provided in `sp.mypsf` and then (optionally)

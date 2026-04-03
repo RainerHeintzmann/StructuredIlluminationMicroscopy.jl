@@ -154,7 +154,16 @@ function simulate_sim(obj, sp::SIMParams, downsample_factor::Int = 1; n_photons 
             sim_pattern = SIMPattern(h, sp, n, otf_num)
             myidx = ntuple(d->(d==ndims(sim_data)) ? n : Colon(), ndims(sim_data))
             # sim_data[myidx...] .= conv_psf(obj .* sim_pattern, h)
-            myrfft = rfft(emission_modification.(obj .* sim_pattern))
+            normal_emission = obj .* sim_pattern
+            modified_emission = emission_modification.(normal_emission)
+            if (n == 1 && emission_modification != identity)
+                ratio = maximum(normal_emission) / maximum(modified_emission)
+                if (ratio < 1.2 && ratio > 0.8)
+                    @warn "emission modification was only $(ratio)"
+                end
+                println("emission modification was $(ratio)")
+            end
+            myrfft = rfft(modified_emission)
             # if (downsample_factor != 1.0)
             #     myrfft = rfft_crop(myrfft, dsz) # leads to downsampling
             # end
@@ -228,7 +237,7 @@ function simulate_sim_3d(obj, spf, mypsf; n_photons = 1000, n_photons_bg=1.2f0, 
     tmp_k_est = spf.k_peak_pos
     df = (downsample_factor, downsample_factor, 1)
     spf.k_peak_pos = [k_peak_pos./df  for k_peak_pos in (spf.k_peak_pos)]    
-    measured, sp = simulate_sim(obj, spf, downsample_factor; n_photons = n_photons, n_photons_bg = n_photons_bg, emission_modification=identity);
+    measured, sp = simulate_sim(obj, spf, downsample_factor; n_photons = n_photons, n_photons_bg = n_photons_bg, emission_modification=emission_modification);
     spf.k_peak_pos = tmp_k_est
     spf.mypsf = tmppsf # restore the PSF in the SIMParams
 

@@ -37,8 +37,8 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
                             subtract_mean=true, upsample=false, suppress_sigma=0.15, 
                             num_directions=0, ideal_strength=true, implied_higher_orders=0,
                             otf_exponent = 1.0, otf_moebius = 1.0, amp_magnitudes=nothing, individual_otfs=false,
-                            show_quality=true, notch_filter=nothing, verbose=true, phase_only=false)
-    if num_directions > 0
+                            show_quality=true, notch_filter=nothing, verbose=true, phase_only=false, method=:FindIter, scale = 200, roi_size = 2)
+    if (num_directions > 0)
         num_phases = size(dat, ndims(dat)) ÷ num_directions;
         if num_phases * num_directions != size(dat, ndims(dat))
             error("The number of phases times the number of directions must equal the number of frames.")
@@ -58,7 +58,7 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
                                             subtract_mean=subtract_mean, suppress_sigma=suppress_sigma, 
                                             num_directions=0, ideal_strength=ideal_strength, implied_higher_orders=implied_higher_orders,
                                             amp_magnitudes=amp_magnitudes, otf_exponent=otf_exponent, otf_moebius = otf_moebius, individual_otfs=individual_otfs,
-                                            show_quality=show_quality, notch_filter=notch_filter, verbose=verbose, phase_only=phase_only)
+                                            show_quality=show_quality, notch_filter=notch_filter, verbose=verbose, phase_only=phase_only, method=method, scale=scale, roi_size=roi_size)
             if (d == 1)
                 spf = spf_sub
             else
@@ -101,6 +101,7 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
         end
         return spf
     end
+
     # psf = abs2.(ift(rr(size(dat)[1:2]) .< 0.25*size(dat,1)))
     # psf ./= sum(psf)
     cs = size(dat)[1:2]
@@ -182,10 +183,10 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
 
     if isnothing(k_vecs)
         # let the user interactively select the initial k vectors:
-        k_vecs, _, _ = get_subpixel_correl(peak_ref; other=refdat, psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=true, show_quality=show_quality, phase_only=phase_only)
+        k_vecs, _, _ = get_subpixel_correl(peak_ref; other=refdat, psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=true, show_quality=show_quality, phase_only=phase_only, method=method, scale=scale, roi_size=roi_size)
         println("You can call this function with the k_vecs parameter $(k_vecs) to speed up the estimation.")
     else
-        k_vecs, _, _ = get_subpixel_correl(peak_ref; other=refdat, k_est = k_vecs,  psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=false, show_quality=show_quality, phase_only=phase_only)
+        k_vecs, _, _ = get_subpixel_correl(peak_ref; other=refdat, k_est = k_vecs,  psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=false, show_quality=show_quality, phase_only=phase_only, method=method, scale=scale, roi_size=roi_size)
     end
 
     # find_shift(dat[:,:,1], dat[:,:,1])
