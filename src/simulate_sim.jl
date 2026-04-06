@@ -110,6 +110,24 @@ function get_kz(pp, sampling::NTuple, k1)
     return kz
 end
 
+"""
+    randomize_phases(spf::SIMParams, ΔΦ = 0.1)
+
+applies a random phase shift uniformly distributed between -ΔΦ and ΔΦ to the phase data
+in a copy of spf which is returned.
+"""
+function randomize_phases(spf::SIMParams, ΔΦ = 0.1)
+    modified_spf = SIMParams(spf)
+    for order in 2:size(spf.peak_strengths,2)
+        for img_num in 1:size(spf.peak_strengths,1)
+            if (spf.peak_strengths[img_num, order] != 0)
+                modified_spf.peak_phases[img_num, order] += (2*rand()-1)*ΔΦ
+            end
+        end
+    end
+    return modified_spf
+end
+
 
 """
     simulate_sim(obj, sp::SIMParams, downsample_factor::Int = 1; n_photons = 0.0, n_photons_bg=0.0, emission_modification=identity)

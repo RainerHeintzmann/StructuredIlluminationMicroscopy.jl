@@ -29,14 +29,15 @@ function main()
     # spf = SIMParams(mypsf, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases);
     spf = generate_peaks_param(mypsf, num_images, num_directions, num_orders, rel_peak / (num_orders-1))
 
+    mspf = randomize_phases(spf, 1.2) # 
 
     # obj[1,1] = 1.0
     # obj = CuArray(obj)
     # obj .= 1f0
     downsample_factor = 2
-    num_photons = 100.00
+    num_photons = 0.0 # 100.00
     num_photons_bg = 0.0 # 100.0 # background photons
-    @time sim_data, sp = simulate_sim(obj, spf, downsample_factor; n_photons=num_photons, n_photons_bg=num_photons_bg);
+    @time sim_data, sp = simulate_sim(obj, mspf, downsample_factor; n_photons=num_photons, n_photons_bg=num_photons_bg);
     if (use_cuda)
         sim_data = CuArray(sim_data);
     end
@@ -68,20 +69,33 @@ function main()
     rp.hgoal = hgoal_j0 # (rrel) -> hgoal_exp(rrel; exponent=0.3)
 
     use_final_filter = true # if false, the final is not applied, yielding a flat-noise spectrum
+
+    # to check the order unmixing
+    @vt ft2d.(test_unmix_real(sim_data, sp))
+
+    # reconstruct with the ideal parameters
     prep = recon_sim_prepare(sim_data, sp, rp; use_final_filter=use_final_filter); # do preallocate
     @time recon = recon_sim(sim_data, prep, sp);
 
     # CUDA.@allowscalar wf = resample(sum(sim_data, dims=3)[:,:,1], size(recon))
     wf = resample(sum(sim_data, dims=3)[:,:,1], size(recon))
     # @vt recon
-    @vt obj wf recon 
-    @vt ft(obj) ft(wf) ft(recon) 
+    vr = @vv obj; @vt vr wf recon 
+    vf = @vv ft(obj); @vt vf ft(wf) ft(recon) 
 
     # now use the parameters estimated from the (noisy) data
     prep2 = recon_sim_prepare(sim_data, sp_est, rp; use_final_filter=use_final_filter); # do preallocate
     @time recon2 = recon_sim(sim_data, prep2, sp_est);
-    @vt recon recon2 
-    @vt ft(obj) ft(recon) ft(recon2) 
+    @vt vr recon2 
+    @vt vf ft(recon2) 
+
+    # reconstruct with wrong parameters
+    spw = SIMParams(sp)
+    spw.peak_phases = copy(spf.peak_phases) # enforce the wrong ideal phases
+    prep3 = recon_sim_prepare(sim_data, spw, rp; use_final_filter=use_final_filter); # do preallocate
+    @time recon3 = recon_sim(sim_data, prep3, spw);
+    @vt vr recon3 
+    @vt vf ft(recon3) 
 
     if (false) # compare with perfect data to see the noise spectrum
         @time sim_data_p, sp_p = simulate_sim(obj, spf, downsample_factor; n_photons=0, n_photons_bg=0);

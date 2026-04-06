@@ -9,7 +9,7 @@ Parameters:
 """
 function weight_matrix(sp::SIMParams)
     wm = cis.(sp.peak_phases) .* sp.peak_strengths
-    tint = abs(sum(wm[:,1]))
+    tint = abs(sum(wm[:,1])) # just a single scalar factor
     # normalize the forward model to preserve the total intensity of the source
     return wm ./ tint
 end
@@ -25,7 +25,12 @@ Parameters:
 
 """
 function pinv_weight_matrix(sp; Eps=1e-6)
-    res = pinv(weight_matrix(sp))
+    # for the inverse we need to first add the conjugate parts and then remove the doublicates again.
+    # I guess there may be a mathematically faster way to achieve the same, but just working with the 
+    # reduced matrix does NOT work ...
+    mymat = weight_matrix(sp)
+    mymatb = cat(mymat, conj.(mymat[:,2:end]), dims=2)
+    res = pinv(mymatb)[1:size(mymat,2),:]
     res[abs.(res) .< Eps] .= 0.0
 
     res = correct_pinv_weight_matrix(res)

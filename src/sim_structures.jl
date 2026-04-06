@@ -48,7 +48,7 @@ mutable struct SIMParams
         end
         new(mypsf, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases, otf_exponent)
     end
-    function SIMParams(sp::SIMParams; mypsf=sp.mypsf, k_peak_pos=sp.k_peak_pos, peak_phases=sp.peak_phases, peak_strengths=sp.peak_strengths, otf_indices=sp.otf_indices, otf_phases=sp.otf_phases, otf_exponent=sp.otf_exponent)
+    function SIMParams(sp::SIMParams; mypsf=sp.mypsf, k_peak_pos=copy(sp.k_peak_pos), peak_phases=copy(sp.peak_phases), peak_strengths=copy(sp.peak_strengths), otf_indices=copy(sp.otf_indices), otf_phases=copy(sp.otf_phases), otf_exponent=copy(sp.otf_exponent))
         new(mypsf, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases, otf_exponent)
     end
 end
