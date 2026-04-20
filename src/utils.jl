@@ -18,6 +18,8 @@ end
     pinv_weight_matrix(sp; Eps=1e-6)
 
 return the pseudo-inverse of the weight matrix from the peak_phases and peak_strengths in the SIMParams object.
+Note that this requires to first extend the weight matrix by its conjugate terms (for non-zero orders),
+calculate the Moor-Penrose pseudo-inverse and then remove the doublicate half.
 
 Parameters:
 + `sp::SIMParams` : SIMParams object, containing SIMParams.peak_phases and SIMParams.peak_strengths
@@ -25,7 +27,7 @@ Parameters:
 
 """
 function pinv_weight_matrix(sp; Eps=1e-6)
-    # for the inverse we need to first add the conjugate parts and then remove the doublicates again.
+    # for the pseudo inverse we need to first concatinate the conjugate parts and then remove the doublicates again.
     # I guess there may be a mathematically faster way to achieve the same, but just working with the 
     # reduced matrix does NOT work ...
     mymat = weight_matrix(sp)

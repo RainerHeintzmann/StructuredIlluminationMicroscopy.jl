@@ -293,3 +293,52 @@ function kvecs_to_peak(k_vecs, sz)
     return to_peak.(k_vecs)
 end
 
+"""
+    correlate_raw_data(sim_data, sp::SIMParams)
+
+this function correlates all raw data images and various k-positions according to 
+K. Wicker, O. Mandula, G. Best, R. Fiolka, R. Heintzmann, Phase optimisation for structured illumination microscopy, Optics Express 21, 2032–2049, 2013
+https://opg.optica.org/oe/fulltext.cfm?uri=oe-21-2-2032
+See section 4.3 onwards to calculate the image correlation tensor D_ij^(l) with i, j being the images and l being the shift-k-vector
+and from there the optimization can be performed via
+C = M^(-1) D^(l) M^(-1)*
+
+with the aim to optimize the phases (and order-strength) to minimize artefacts.
+"""
+function correlate_raw_data(sim_data, sp::SIMParams)
+    num_ks = length(sp.k_peak_pos)
+    num_imgs = size(sim_data)[end]
+    D_ijl = zeros(ComplexF64, num_imgs, num_imgs, num_ks)
+    for (l, myk) in enumerate(sp.k_peak_pos)
+        k_exponential = exp_ikx_sep(complex_arr_type(typeof(sim_data)), size(sim_data)[1:end-1]; shift_by=myk)
+        for (i, sim_slice1) in enumerate(eachslice(sim_data; dims=ndims(sim_data)))
+            for (j, sim_slice2) in enumerate(eachslice(sim_data; dims=ndims(sim_data)))
+                D_ijl[i,j,l] = sum(sim_slice1 .* k_exponential .* conj.(sim_slice2))
+                D_ijl[j,i,l] = conj.(D_ijl[j,i,l])
+            end
+        end
+    end
+    return D_ijl
+end
+
+"""
+    Cijl_from_Dijl(M, Dijl)
+
+converts the Dijl matrix containing the correlations between images into a 
+Cijl matrix, containing the correlations between orders (i.e. k-vector positions).
+
+```jdoctest
+Example:
+Dijl = StructuredIlluminationMicroscopy.correlate_raw_data(sim_data, sp)
+M = StructuredIlluminationMicroscopy.weight_matrix(sp)
+StructuredIlluminationMicroscopy.Cijl_from_Dijl(M, Dijl)
+```
+"""
+function Cijl_from_Dijl(M, D_ijl)
+    M_inv = pinv(cat(M, conj.(M[:,2:end]), dims=2))
+    C_ijl = zeros(size(D_ijl))
+    for l = 1:size(D_ijl,3)
+        C_ijl[:,:,l] = M_inv*D_ijl[:,:,l]*conj.(M_inv)
+    end
+    return C_ijl
+end
