@@ -1,3 +1,6 @@
+# ] add https://github.com/RainerHeintzmann/FindShift.jl
+# ] add https://github.com/RainerHeintzmann/StructuredIlluminationMicroscopy.jl
+# ] add TestImages, PointSpreadFunctions, FourierTools, View5D
 using StructuredIlluminationMicroscopy
 using TestImages
 # using BenchmarkTools
