@@ -182,7 +182,8 @@ end
 """
     get_shift_subpixel(img, ordershift)
 
-returns a separable function representation of a pixel-shifter to be multiplied with the FFT
+returns a separable function representation of a pixel-shifter to be multiplied with the FFT.
+    Note that it ignores the z-component of the ordershift, which is already accounted for in the OTF.
 """
 function get_shift_subpixel(img, ordershift)
     pixelshift = round.(Int, ordershift)
