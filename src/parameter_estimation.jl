@@ -112,6 +112,7 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
             if isnothing(refdat)
                 refdat = mymean 
             end
+            # subtract the appropriately scaled mean from each slice.
             Float32.(dat) .- Float32.(mymean) .* sum(dat, dims=(1:ndims(dat)-1)) ./ sum(mymean)
         else
             if isnothing(refdat)
