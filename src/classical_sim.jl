@@ -55,7 +55,9 @@ function separate_and_place_orders(sim_data, sp::SIMParams, prep)
         # unmix (separate) an order from the data, writes into order:
         dot_mul_last_dim!(order, sim_data, prep.pinv_weight_mat, n);
         # apply a real-space subpixel shift to the order prior to its fft:
-        ordershift = shift_subpixel!(order, ordershift, prep, n) 
+        # if (rp.preshift_otfs)
+            ordershift = shift_subpixel!(order, ordershift, prep, n) 
+        # end
         pixelshifts[n] = ordershift 
 
         # now place (add) the order with possible weights into the result RFFT image
@@ -112,6 +114,11 @@ Generate the OTFs for the SIM reconstruction from PSFs provided in `sp.mypsf` an
 creating according to sp.otf_indices the z-modified OTFs for the SIM reconstruction.
 The finally returned OTFs correspond to the indices as in `sp.otf_indices`).
 
+Note on orders, which are not perfectly placed along the kz axis:
+As soon as there is a kx or ky component, the corresponding OTF is not perfectly aligned with the z-axis and thus the OTF is not a simple 2D OTF in the xy-plane.    
+Simulation can account for the individual orders in kx,ky,kz but this can only be unmixed, if the
+phases are varied between those orders with different kx and ky.
+
 Parameters:
 + `ACT` : datatype of the OTF arrays
 + `sz` : size of the OTFs
@@ -134,14 +141,14 @@ function get_otfs(ACT, sz, sp::SIMParams, use_rft = false)
         if (length(sz) > 2 && sz[3] > 1)
             zz(RT, (1,1, sz[3]))
         else
-            1.0
+            1
         end
     end
     hm = mypsf
     for i in eachindex(otfs)
         kz = pi*sp.k_peak_pos[i][3]
         if (kz != 0.0) # shift to +/- kz position and account for the z-related misadjustment via peak_phase:
-            hm = mypsf .* cos.(pz .* kz .+ sp.peak_phases[i]); # Division by two to account for zero order(s) being twice as strong
+            hm = mypsf .* cos.(pz .* kz .+sp.peak_phases[i]); # Division by two to account for zero order(s) being twice as strong
         end
         myotf = (use_rft) ? rfft(ifftshift(hm)) : fftshift(fft(ifftshift(hm)))
         otfs[i] = myotf
@@ -358,29 +365,31 @@ function normalize_otfs!(prep, rp; keep_hf = false, otf_masks=nothing, otf_thres
     # Note: The otfs are already subpixel shifted in Fourier space, which means that the corresponding psfs have phase slopes
     # Since we normalize the weights, via a sum of the absolute square weights of all other orders overlapping
     # with the currently considered order (outer loop), we already undo the individual suppixel shifts in the corresponding PSFs.
-    all_psfs = [conj.(prep.subpixel_shifters[n]) .* fftshift(ifft(ifftshift(otf))) for (otf, n) in zip(prep.otfs, eachindex(prep.subpixel_shifters))] # the psfs are used to calculate the subpixel shifts, so they need to be in real space;
+    all_psfs = (rp.preshift_otfs) ? [conj.(myshifter) .* fftshift(ifft(ifftshift(otf))) 
+    for (otf, myshifter) in zip(prep.otfs, prep.subpixel_shifters)]  : [fftshift(ifft(ifftshift(otf))) for otf in prep.otfs] # the psfs are used to calculate the subpixel shifts, so they need to be in real space;
     sum_otfs2 = similar(prep.otfs[1]) # abs2.(otf)
     # sqr(x) = x .* x
     for (otf, otf_mask, otf_num) in zip(prep.otfs, otf_masks, eachindex(prep.otfs))
         sum_otfs2 .= zero(eltype(otf)) # zero the sum
-        mid_pos = size(otf) .÷ 2 .+ 1
-        ref_shifter = prep.subpixel_shifters[otf_num]
+        mid_pos = size(otf)[1:2] .÷ 2 .+ 1
+        ref_shifter = (rp.preshift_otfs) ? prep.subpixel_shifters[otf_num] : 1;
         # shift all OTFS to the coordinate system of the currently processed OTF via a phase modification of the psf
         # this would mean invert the subpixel shift and apply the new one and the crop with the integer pixel difference.
         # Since the individual subpixel shift has already been removed, we only need to apply the subpixel shift to the current OTF position.
         # as stored in ref_shifter
         for (mypsf, psf_num) in zip(all_psfs, eachindex(all_psfs))
             # only integer pixel shifts
-            rel_shift = prep.pixelshifts[otf_num] .- prep.pixelshifts[psf_num] 
+            rel_shift = prep.pixelshifts[otf_num][1:2] .- prep.pixelshifts[psf_num][1:2]
             # This applies to the central and all other orders:
             reshifted_psf = ref_shifter.*mypsf
-            sum_otfs2 .+= select_region(abs2.(fftshift(fft(ifftshift(reshifted_psf)))); center = mid_pos .+ rel_shift[1:length(mid_pos)])
+            # force only 2D shifts, ignoring the 3rd component of the k-shift vector, which is already accounted for in the otf            
+            sum_otfs2 .+= select_region(abs2.(fftshift(fft(ifftshift(reshifted_psf)))); center = mid_pos .+ rel_shift)
             # sum_otfs2 .+= select_region(sqr.(fftshift(fft(ifftshift((conj.(mypsf)))))); center = mid_pos .+ rel_shift[1:length(mid_pos)])
             # the central order is only added once and also the noise scales differently without a shift
             if (psf_num !== 1) # (psf_num != otf_num) # (norm(rel_shift) > 0)
                 # only integer pixel shifts
-                rel_shift = prep.pixelshifts[otf_num] .+ prep.pixelshifts[psf_num]
-                sum_otfs2 .+= select_region(abs2.(fftshift(fft(ifftshift((conj.(reshifted_psf)))))); center = mid_pos .+ rel_shift[1:length(mid_pos)])
+                rel_shift = prep.pixelshifts[otf_num][1:2] .+ prep.pixelshifts[psf_num][1:2]
+                sum_otfs2 .+= select_region(abs2.(fftshift(fft(ifftshift((conj.(reshifted_psf)))))); center = mid_pos .+ rel_shift)
                 # sum_otfs2 .+= select_region(sqr.(fftshift(fft(ifftshift(mypsf)))); center = mid_pos .+ rel_shift[1:length(mid_pos)])
             end
             # sum_otfs2 .+= select_region(abs2.(fftshift(fft(ifftshift(mypsf)))); center = mid_pos .+ rel_shift[1:length(mid_pos)])
