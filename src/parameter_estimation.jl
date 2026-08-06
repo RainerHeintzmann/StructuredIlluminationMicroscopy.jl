@@ -1,4 +1,3 @@
-
 """
     function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
                             subtract_mean=true, upsample=false, suppress_sigma=0.0, 
@@ -27,13 +26,16 @@ The function returns the estimated parameters for the SIM image.
 - `show_quality`: If true, the function will print the conditioning quality of the unmixing matrix. Default is true.
 - `verbose`: If true, the function will print information about the estimation process. Default is true.
 - `phase_only`: If true, the function will only consider the phase information in Fourierspace for the autocorrelation. Default is `false`.
+- `peak_ref`: should be `nothing`, except if this was already precomputed using the function `precompute_correlations`.
+- `corr_psf`: should be `nothing`, except if this was already precomputed using the function `precompute_correlations`.
+- `cropped`: should be `nothing`, except if this was already precomputed using the function `precompute_correlations`.
 
 # Returns
 - `sp`: The estimated parameters for the SIM image. This is a `SIMParams` object containing the estimated parameters.
 
 
 """
-function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
+function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing, peak_ref=nothing, corr_psf=nothing, cropped=nothing,
                             subtract_mean=true, upsample=false, suppress_sigma=0.15, 
                             num_directions=0, ideal_strength=true, implied_higher_orders=0,
                             otf_exponent = 1.0, otf_moebius = 1.0, amp_magnitudes=nothing, individual_otfs=false,
@@ -102,85 +104,13 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
         return spf
     end
 
-    # psf = abs2.(ift(rr(size(dat)[1:2]) .< 0.25*size(dat,1)))
-    # psf ./= sum(psf)
-    cs = size(dat)[1:2]
-    # preprocess the data according to the settings
     mymean = mean(dat, dims=ndims(dat)) 
-    cropped = let
-        if (subtract_mean)
-            if isnothing(refdat)
-                refdat = mymean 
-            end
-            # subtract the appropriately scaled mean from each slice.
-            Float32.(dat) .- Float32.(mymean) .* sum(dat, dims=(1:ndims(dat)-1)) ./ sum(mymean)
-        else
-            if isnothing(refdat)
-                refdat = mymean
-            end
-            Float32.(dat)
-        end
+    if isnothing(refdat)
+        refdat = mymean 
     end
-
-    # select the PSF to use for prefiltering
-    # if isnothing(mypsf)
-    #     mypsf = collect(delta(eltype(dat), size(dat)[1:end-1]))
-    # end
-
-    corr_psf = mypsf
-    if !isnothing(mypsf)
-        corr_psf = mypsf ./ sum(mypsf) # let
-        corr_otf = fft(corr_psf)
-        was_modified = false
-        if (otf_moebius != 1 || otf_exponent != 1)
-            # gamma = 0.5;x=0:0.01:1; plot(moebius.(x, 1/gamma), label="moebius γ=$(gamma)"); plot!(x.^gamma, label="exp γ=$(gamma)")
-            # gamma = 2;x=0:0.01:1; plot!(moebius.(x, 1/gamma), label="moebius γ=$(gamma)"); plot!(x.^gamma, label="exp γ=$(gamma)")
-            # gamma = 1;x=0:0.01:1; plot!(moebius.(x, 1/gamma), label="moebius γ=$(gamma)")
-            # xlabel!("input"); ylabel!("output"); title!("Moebius vs. Expontial Gamma Correction")
-            if (otf_moebius != 1)
-                old_mag = abs.(corr_otf);
-                gamma = 1/otf_moebius;  # to make it behave like the exponential gamma
-                moebius(old_mag, gamma) = gamma*old_mag/(1+(gamma-1)*old_mag)
-                corr_otf .= cis.(angle.(corr_otf)) .* moebius.(old_mag, gamma)
-            end
-            if (otf_exponent != 1)
-                new_mag = abs.(corr_otf) .^ otf_exponent
-                corr_otf .= cis.(angle.(corr_otf)) .* new_mag
-            end
-            mypsf = real.(ifft(corr_otf))
-            mypsf = mypsf ./ sum(mypsf) # let
-            was_modified = true
-        end
-        # modify the PSF to suppress the low frequencies, if wanted
-        if ndims(corr_otf) > 2
-            corr_otf = @view corr_otf[:,:,1]
-            midz = size(corr_psf,3) ÷ 2 + 1
-            corr_psf = @view corr_psf[:,:,midz]
-        end
-        shift_x = (angle(-corr_otf[2,1])) .* size(corr_otf,1) / 2pi
-        shift_y = (angle(-corr_otf[1,2])) .* size(corr_otf,2) / 2pi
-
-        if (abs(shift_x) > 0.05 || abs(shift_y) > 0.05)
-            @warn "The PSF is significantly asymmtric or shifted by $(shift_x), $(shift_y).\nThis may lead to problems in the estimation. Trying to correct shift"
-            shifter = ifftshift(exp_ikx_col(typeof(corr_otf), size(corr_otf), shift_by=(shift_x, shift_y)))
-            corr_otf .*= shifter
-            was_modified = true
-        end
-        if (suppress_sigma > 0)
-            # construct a 1-gaussian to suppress the low frequencies of the PSF
-            gs = ifftshift(1 .- gaussian_sep(real_arr_type(typeof(corr_psf)), size(corr_psf); sigma=suppress_sigma .* size(corr_psf)))
-            corr_otf .*= gs
-            was_modified = true
-        end
-        if (was_modified)
-            corr_psf = ifft(corr_otf)
-        end
-    end
-
-    # use the first provided image as the one to correlate with the reference.
-    # The prefiltering is done in get_subpixel_correl.
     refdat = squeeze_dim(refdat, ndims(refdat))
-    peak_ref = squeeze_dim(slice(cropped, ndims(cropped), 1), ndims(cropped)) # [:,:,1]
+
+    peak_ref, corr_psf, cropped = isnothing(peak_ref) ? precompute_correlations(dat, mypsf; subtract_mean=subtract_mean, datmean=mymean) : (peak_ref, corr_psf)
 
     if isnothing(k_vecs)
         # let the user interactively select the initial k vectors:
@@ -250,6 +180,116 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
     end
 
     return spf
+end
+
+function precompute_correlations(dat, mypsf=nothing; subtract_mean=true, datmean=mean(dat, dims=ndims(dat)) )
+    # psf = abs2.(ift(rr(size(dat)[1:2]) .< 0.25*size(dat,1)))
+    # psf ./= sum(psf)
+    cs = size(dat)[1:2]
+    # preprocess the data according to the settings
+
+    cropped = let
+        if (subtract_mean)
+            # subtract the appropriately scaled mean from each slice.
+            Float32.(dat) .- Float32.(datmean) .* sum(dat, dims=(1:ndims(dat)-1)) ./ sum(datmean)
+        else
+            Float32.(dat)
+        end
+    end
+
+    # select the PSF to use for prefiltering
+    # if isnothing(mypsf)
+    #     mypsf = collect(delta(eltype(dat), size(dat)[1:end-1]))
+    # end
+
+    corr_psf = mypsf
+    if !isnothing(mypsf)
+        corr_psf = mypsf ./ sum(mypsf) # let
+        corr_otf = fft(corr_psf)
+        was_modified = false
+        if (otf_moebius != 1 || otf_exponent != 1)
+            # gamma = 0.5;x=0:0.01:1; plot(moebius.(x, 1/gamma), label="moebius γ=$(gamma)"); plot!(x.^gamma, label="exp γ=$(gamma)")
+            # gamma = 2;x=0:0.01:1; plot!(moebius.(x, 1/gamma), label="moebius γ=$(gamma)"); plot!(x.^gamma, label="exp γ=$(gamma)")
+            # gamma = 1;x=0:0.01:1; plot!(moebius.(x, 1/gamma), label="moebius γ=$(gamma)")
+            # xlabel!("input"); ylabel!("output"); title!("Moebius vs. Expontial Gamma Correction")
+            if (otf_moebius != 1)
+                old_mag = abs.(corr_otf);
+                gamma = 1/otf_moebius;  # to make it behave like the exponential gamma
+                moebius(old_mag, gamma) = gamma*old_mag/(1+(gamma-1)*old_mag)
+                corr_otf .= cis.(angle.(corr_otf)) .* moebius.(old_mag, gamma)
+            end
+            if (otf_exponent != 1)
+                new_mag = abs.(corr_otf) .^ otf_exponent
+                corr_otf .= cis.(angle.(corr_otf)) .* new_mag
+            end
+            mypsf = real.(ifft(corr_otf))
+            mypsf = mypsf ./ sum(mypsf) # let
+            was_modified = true
+        end
+        # modify the PSF to suppress the low frequencies, if wanted
+        if ndims(corr_otf) > 2
+            corr_otf = @view corr_otf[:,:,1]
+            midz = size(corr_psf,3) ÷ 2 + 1
+            corr_psf = @view corr_psf[:,:,midz]
+        end
+        shift_x = (angle(-corr_otf[2,1])) .* size(corr_otf,1) / 2pi
+        shift_y = (angle(-corr_otf[1,2])) .* size(corr_otf,2) / 2pi
+
+        if (abs(shift_x) > 0.05 || abs(shift_y) > 0.05)
+            @warn "The PSF is significantly asymmtric or shifted by $(shift_x), $(shift_y).\nThis may lead to problems in the estimation. Trying to correct shift"
+            shifter = ifftshift(exp_ikx_col(typeof(corr_otf), size(corr_otf), shift_by=(shift_x, shift_y)))
+            corr_otf .*= shifter
+            was_modified = true
+        end
+        if (suppress_sigma > 0)
+            # construct a 1-gaussian to suppress the low frequencies of the PSF
+            gs = ifftshift(1 .- gaussian_sep(real_arr_type(typeof(corr_psf)), size(corr_psf); sigma=suppress_sigma .* size(corr_psf)))
+            corr_otf .*= gs
+            was_modified = true
+        end
+        if (was_modified)
+            corr_psf = ifft(corr_otf)
+        end
+    end
+
+    # use the first provided image as the one to correlate with the reference.
+    # The prefiltering is done in get_subpixel_correl.
+    peak_ref = squeeze_dim(slice(cropped, ndims(cropped), 1), ndims(cropped)) # [:,:,1]
+
+    return peak_ref, corr_psf, cropped
+end
+
+"""
+    get_correlation_map(dat, mypsf=nothing; subtract_mean=true, datmean=mean(dat, dims=ndims(dat)), upsample=false)
+
+computes a correlation map that can be used for interactive and automatic peak identification.
+# Arguments
+- `dat`: The data to correlate
+- `psf`: an (optional) psf to determing the weights during correlation. If `nothing` is provided a psf will be assumed.
+- `other`: a possibly second dataset to correlate to
+- `upsample`: determines whether upsampling (Fourier-padding) is used to calculate the correlation. Upsampling is a little more accurate but slower.
+- `subtract_mean`: If true, the mean value will be subtracted
+
+"""
+function get_correlation_map(dat, mypsf=nothing, refdat=nothing; subtract_mean=true, datmean=mean(dat, dims=ndims(dat)), upsample=false)
+    mymean = datmean;  
+    if isnothing(refdat)
+        refdat = mymean 
+    end
+    refdat = squeeze_dim(refdat, ndims(refdat))
+
+    peak_ref, corr_psf, _ = precompute_correlations(dat, mypsf; subtract_mean=subtract_mean, datmean=mymean) 
+
+    dat = peak_ref;
+    if isnothing(refdat)
+        refdat = dat
+    end
+    up = FindShift.prepare_correlation(dat, corr_psf; upsample=upsample)
+    up_other = FindShift.prepare_correlation(refdat, corr_psf; upsample=upsample)
+
+    ftcorrel = up .* conj.(up_other)
+
+    return ftcorrel, peak_ref, corr_psf
 end
 
 """

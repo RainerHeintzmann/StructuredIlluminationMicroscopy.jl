@@ -97,6 +97,7 @@ module StructuredIlluminationMicroscopy
     export PARA_SET, create_grating, find_grating, check_phase_steps
     export upsample_bc!, upsample_conv_lanczos!, upsampled_size, run_conv_upsample, run_conv_upsample!, conv_upsample_tullio
     export just_separate, randomize_phases
+    export precompute_correlations, get_correlation_map
 
     include("h_goal.jl")    
     include("preprocess.jl")    
