@@ -55,9 +55,9 @@ function separate_and_place_orders(sim_data, sp::SIMParams, prep)
         # unmix (separate) an order from the data, writes into order:
         dot_mul_last_dim!(order, sim_data, prep.pinv_weight_mat, n);
         # apply a real-space subpixel shift to the order prior to its fft:
-        # if (rp.preshift_otfs)
+        if !isnothing(prep.subpixel_shifters[1])
             ordershift = shift_subpixel!(order, ordershift, prep, n) 
-        # end
+        end
         pixelshifts[n] = ordershift 
 
         # now place (add) the order with possible weights into the result RFFT image
@@ -261,6 +261,7 @@ function get_modified_otfs(ACT, sz, sp::SIMParams, rp, use_rft = false; do_modif
             all_shifters[i] = myshifter
         else
             myotf = otfs[sp.otf_indices[i]]
+            all_shifters[i] = nothing
         end
         # scale the OTFs of the separated orders by the std.dev. of the noise
         if (i == 1)
