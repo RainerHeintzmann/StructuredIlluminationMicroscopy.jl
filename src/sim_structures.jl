@@ -122,6 +122,7 @@ mutable struct ReconParams
     slice_by_slice::Bool # whether to reconstruct slice by slice
     do_deconvolve::Bool # whether to deconvolve the result instead of Wiener filtering
     deconv_lambda::Float64 # the lambda parameter for deconvolution, typically 1.2
+    background::Float64 # the background level passed to the deconvolution forward model
     keep_hf::Bool # whether to keep the high-frequency components of the OTFs (default: false)
     otf_radius::Float64 # the radius of the pupil, used for the otf masks. zero means that a threshold is used instead of a radius
 
@@ -138,7 +139,8 @@ mutable struct ReconParams
         use_measure=false, # to work with CUDA
         double_use=true,
         preshift_otfs=true,
-        slice_by_slice=false, do_deconvolve=false, deconv_lambda=1.2, keep_hf=false)
+        slice_by_slice=false, do_deconvolve=false, deconv_lambda=1.2, keep_hf=false,
+        background = 0.0)
         otf_radius = 0.0 # 0 means that a threshold is used instead of a radius
         new(notch, Float64(suppression_sigma), 
             Float64(suppression_strength), 
@@ -146,7 +148,7 @@ mutable struct ReconParams
             reference_slice,
             Float64(wiener_eps),
             Float64(hgoal_thresh),
-            do_preallocate, use_measure, double_use, preshift_otfs, hgoal, slice_by_slice, do_deconvolve, deconv_lambda, keep_hf, otf_radius)
+            do_preallocate, use_measure, double_use, preshift_otfs, hgoal, slice_by_slice, do_deconvolve, deconv_lambda, background, keep_hf, otf_radius)
     end
 end
 
@@ -195,6 +197,7 @@ mutable struct PreparationParams{RAT, CAT} # , CT, D, RT, TA <: AbstractArray{CT
     plan_fft!::AbstractFFTs.Plan
     plan_irfft::AbstractFFTs.Plan
     deconv_lambda::Float64
+    background::Float64
 
     function PreparationParams(RAT::Type)
         CAT = complex_arr_type(RAT, Val(ndims(RAT)))
@@ -203,6 +206,7 @@ mutable struct PreparationParams{RAT, CAT} # , CT, D, RT, TA <: AbstractArray{CT
         rat_dummy = RAT(undef, ntuple((d)->0, ndims(RAT)))
         plan_dummy = plan_fft!(cat_dummy)
         deconv_lambda=1.2;
+        background=0.0
 
         new{RAT, CAT}(pinv_dummy, [cat_dummy,], [(0,0,0),],
                       false, 2, # slice_by_slice, upsample_factor
@@ -210,7 +214,7 @@ mutable struct PreparationParams{RAT, CAT} # , CT, D, RT, TA <: AbstractArray{CT
                       [], # subpixel shifters
                       cat_dummy, cat_dummy, # ftorder, order
                       rat_dummy, cat_dummy, cat_dummy,# result, result_rft, result_rft_tmp
-                      plan_dummy, plan_dummy, deconv_lambda)
+                      plan_dummy, plan_dummy, deconv_lambda, background)
     end
 end
 

@@ -502,6 +502,7 @@ function recon_sim_prepare(sim_data, sp::SIMParams, rp::ReconParams; use_final_f
         if (rp.do_deconvolve)
             prep.rec_otf = rec_otf
             prep.deconv_lambda = rp.deconv_lambda
+            prep.background = rp.background
         end
 
         if (use_final_filter)
@@ -579,7 +580,7 @@ function recon_sim(sim_data, prep, sp::SIMParams)
         @info "deconvolving with rec_otf, iterations: $iterations"
         # result, o = deconvolution(result, mypsf, regularizer=TH(), λ=0.0001, loss=Anscombe(100f0));
         # result, o = deconvolution(result, mypsf, regularizer=TH(), mapping=nothing, λ=prep.deconv_lambda, loss=Gauss());
-        result, o = deconvolution(result, mypsf, regularizer=TH(), λ=prep.deconv_lambda, loss=Gauss(), iterations=iterations);
+        result, o = deconvolution(result, mypsf, regularizer=TH(), λ=prep.deconv_lambda, loss=Gauss(), iterations=iterations, normalize_data=false, normalize_psf=false, background=prep.background);
         return result
     else
         if (prod(size(prep.final_filter))>1) # haskey(prep, :final_filter))

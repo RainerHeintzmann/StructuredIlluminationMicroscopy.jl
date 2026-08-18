@@ -110,7 +110,7 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
     end
     refdat = squeeze_dim(refdat, ndims(refdat))
 
-    peak_ref, corr_psf, cropped = isnothing(peak_ref) ? precompute_correlations(dat, mypsf; subtract_mean=subtract_mean, datmean=mymean) : (peak_ref, corr_psf)
+    peak_ref, corr_psf, cropped = isnothing(peak_ref) ? precompute_correlations(dat, mypsf; otf_moebius=otf_moebius, otf_exponent=otf_exponent, suppress_sigma=suppress_sigma, subtract_mean=subtract_mean, datmean=mymean) : (peak_ref, corr_psf)
 
     if isnothing(k_vecs)
         # let the user interactively select the initial k vectors:
@@ -182,7 +182,7 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
     return spf
 end
 
-function precompute_correlations(dat, mypsf=nothing; subtract_mean=true, datmean=mean(dat, dims=ndims(dat)) )
+function precompute_correlations(dat, mypsf=nothing; subtract_mean=true, datmean=mean(dat, dims=ndims(dat)), otf_moebius=1f0, otf_exponent=1f0, suppress_sigma=0.15)
     # psf = abs2.(ift(rr(size(dat)[1:2]) .< 0.25*size(dat,1)))
     # psf ./= sum(psf)
     cs = size(dat)[1:2]
@@ -271,14 +271,14 @@ computes a correlation map that can be used for interactive and automatic peak i
 - `subtract_mean`: If true, the mean value will be subtracted
 
 """
-function get_correlation_map(dat, mypsf=nothing, refdat=nothing; subtract_mean=true, datmean=mean(dat, dims=ndims(dat)), upsample=false)
+function get_correlation_map(dat, mypsf=nothing, refdat=nothing; subtract_mean=true, datmean=mean(dat, dims=ndims(dat)), upsample=false, otf_moebius=1f0, otf_exponent=1f0, suppress_sigma=0.15)
     mymean = datmean;  
     if isnothing(refdat)
         refdat = mymean 
     end
     refdat = squeeze_dim(refdat, ndims(refdat))
 
-    peak_ref, corr_psf, _ = precompute_correlations(dat, mypsf; subtract_mean=subtract_mean, datmean=mymean) 
+    peak_ref, corr_psf, _ = precompute_correlations(dat, mypsf; subtract_mean=subtract_mean, datmean=mymean, otf_moebius=otf_moebius, otf_exponent=otf_exponent, suppress_sigma=suppress_sigma) 
 
     dat = peak_ref;
     if isnothing(refdat)
