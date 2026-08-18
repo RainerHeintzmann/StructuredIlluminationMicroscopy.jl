@@ -251,7 +251,7 @@ function SIMPattern(h, sp::SIMParams, n, otf_num)
 end
 
 """
-    make_3d_pattern!(sp, num_directions, num_orders)
+    make_3d_pattern!(k_peak_pos, offset_phase=0.0; individual_otfs=false)
 
 fills the sp.otf_indices and sp.otf_phases arrays with sensible values for a 3D pattern.
 """
