@@ -83,6 +83,7 @@ module StructuredIlluminationMicroscopy
 
     export PSFParams, SIMParams, ReconParams, PreparationParams
     export generate_peaks, generate_peaks_param, recon_sim_prepare, recon_sim, make_3d_pattern, get_otfs, get_kz
+    export recon_sim_orders, recon_sim_finalize, update_final_filter!, deconvolve_result
     export separate_and_place_orders, modify_otf, SIMPattern, get_upsampled_rft, get_result_size, ifftshift_sep!, fftshift_sep!
     export get_shift_subpixel, pinv_weight_matrix, shift_subpixel!, shift_subpixel, shift_subpixel_fft, dot_mul_last_dim!, add!, conj_add!
     export rfft_crop, rfft_size, rfftshift, rifftshift, rfftshift!, rifftshift!, get_rft_center
@@ -97,6 +98,7 @@ module StructuredIlluminationMicroscopy
     export PARA_SET, create_grating, find_grating, check_phase_steps
     export upsample_bc!, upsample_conv_lanczos!, upsampled_size, run_conv_upsample, run_conv_upsample!, conv_upsample_tullio
     export just_separate, randomize_phases
+    export precompute_correlations, get_correlation_map
 
     include("h_goal.jl")    
     include("preprocess.jl")    
