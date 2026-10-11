@@ -102,6 +102,7 @@ Fields:
 + `slice_by_slice::Bool` : slice by slice reconstruction
 + `do_deconvolve::Bool` : deconvolve the result instead of Wiener filtering
 + `deconv_lambda::Float64` : the lambda parameter for deconvolution, typically 1.2
++ `deconv_iterations::Int` : the number of iterations for deconvolution, default 16
 + `keep_hf::Bool` : whether to keep the high-frequency components of the OTFs (default: false)
 + `otf_radius::Float64` : the relative radius of the pupil compared to the sampling limit, used for the OTF masks. zero means that a threshold is used instead of a radius. default is 0.0
 
@@ -125,6 +126,7 @@ mutable struct ReconParams
     background::Float64 # the background level passed to the deconvolution forward model
     keep_hf::Bool # whether to keep the high-frequency components of the OTFs (default: false)
     otf_radius::Float64 # the radius of the pupil, used for the otf masks. zero means that a threshold is used instead of a radius
+    deconv_iterations::Int # the number of iterations used for deconvolution
 
     function ReconParams(; # constructor with default values
         notch = nothing,
@@ -140,7 +142,7 @@ mutable struct ReconParams
         double_use=true,
         preshift_otfs=true,
         slice_by_slice=false, do_deconvolve=false, deconv_lambda=1.2, keep_hf=false,
-        background = 0.0)
+        background = 0.0, deconv_iterations = 16)
         otf_radius = 0.0 # 0 means that a threshold is used instead of a radius
         new(notch, Float64(suppression_sigma), 
             Float64(suppression_strength), 
@@ -148,7 +150,7 @@ mutable struct ReconParams
             reference_slice,
             Float64(wiener_eps),
             Float64(hgoal_thresh),
-            do_preallocate, use_measure, double_use, preshift_otfs, hgoal, slice_by_slice, do_deconvolve, deconv_lambda, background, keep_hf, otf_radius)
+            do_preallocate, use_measure, double_use, preshift_otfs, hgoal, slice_by_slice, do_deconvolve, deconv_lambda, background, keep_hf, otf_radius, deconv_iterations)
     end
 end
 
@@ -198,6 +200,9 @@ mutable struct PreparationParams{RAT, CAT} # , CT, D, RT, TA <: AbstractArray{CT
     plan_irfft::AbstractFFTs.Plan
     deconv_lambda::Float64
     background::Float64
+    filter_otf::CAT # normalized OTF of the reconstruction (used by update_final_filter! and deconvolve_result); size 1 if unused
+    filter_hgoal::CAT # goal transfer function used for the final filter; size 1 if unused
+    deconv_iterations::Int
 
     function PreparationParams(RAT::Type)
         CAT = complex_arr_type(RAT, Val(ndims(RAT)))
@@ -214,7 +219,8 @@ mutable struct PreparationParams{RAT, CAT} # , CT, D, RT, TA <: AbstractArray{CT
                       [], # subpixel shifters
                       cat_dummy, cat_dummy, # ftorder, order
                       rat_dummy, cat_dummy, cat_dummy,# result, result_rft, result_rft_tmp
-                      plan_dummy, plan_dummy, deconv_lambda, background)
+                      plan_dummy, plan_dummy, deconv_lambda, background,
+                      cat_dummy, cat_dummy, 16)
     end
 end
 
