@@ -55,9 +55,9 @@ function separate_and_place_orders(sim_data, sp::SIMParams, prep)
         # unmix (separate) an order from the data, writes into order:
         dot_mul_last_dim!(order, sim_data, prep.pinv_weight_mat, n);
         # apply a real-space subpixel shift to the order prior to its fft:
-        # if (rp.preshift_otfs)
+        if !isnothing(prep.subpixel_shifters[1])
             ordershift = shift_subpixel!(order, ordershift, prep, n) 
-        # end
+        end
         pixelshifts[n] = ordershift 
 
         # now place (add) the order with possible weights into the result RFFT image
@@ -261,6 +261,7 @@ function get_modified_otfs(ACT, sz, sp::SIMParams, rp, use_rft = false; do_modif
             all_shifters[i] = myshifter
         else
             myotf = otfs[sp.otf_indices[i]]
+            all_shifters[i] = nothing
         end
         # scale the OTFs of the separated orders by the std.dev. of the noise
         if (i == 1)
@@ -497,24 +498,19 @@ function recon_sim_prepare(sim_data, sp::SIMParams, rp::ReconParams; use_final_f
         rrel .= 1 .- rrel/maximum(abs.(rrel))
         h_goal = rp.hgoal.(rrel)
 
-        # only save this rec_otf if it is used for deconvolution
+        # only use this rec_otf as deconvolution OTF inside recon_sim if deconvolution is requested
         if (rp.do_deconvolve)
             prep.rec_otf = rec_otf
-            prep.deconv_lambda = rp.deconv_lambda
         end
+        prep.deconv_lambda = rp.deconv_lambda
+        prep.deconv_iterations = rp.deconv_iterations
+        prep.background = rp.background
+        # keep what is needed to quickly recompute the final filter (update_final_filter!) or to deconvolve (deconvolve_result)
+        prep.filter_otf = rec_otf
+        prep.filter_hgoal = ACT(h_goal)
 
         if (use_final_filter)
-            if (rp.keep_hf)
-                # modified Wiener filter to allow preserving high-frequency components:
-                # prep.final_filter = ACT(h_goal) .* (conj.(rec_otf)  .+ RT(rp.wiener_eps))./ (abs2.(rec_otf) .+ RT(rp.wiener_eps))
-                prep.final_filter = ACT(h_goal) .* conj.(rec_otf)./ (abs2.(rec_otf) .+ RT(rp.wiener_eps))
-            else
-                # standard Wiener filter:
-                prep.final_filter = ACT(h_goal) .* conj.(rec_otf)./ (abs2.(rec_otf) .+ RT(rp.wiener_eps))
-            end
-            #final_filter = fftshift(rfft(real.(ifft(ifftshift(final_filter)))), [2,3])
-            prep.final_filter = rfftshift(rfft(fftshift(real.(ifft(ifftshift(prep.final_filter))))))
-            # prep.final_filter = (conj.(rec_otf) .+ RT(rp.wiener_eps) ) ./ (abs2.(rec_otf) .+ RT(rp.wiener_eps))
+            update_final_filter!(prep, rp.wiener_eps)
         else
             prep.final_filter = ACT(ones(size(prep.result_rft))) # no final filter
         end
@@ -522,6 +518,67 @@ function recon_sim_prepare(sim_data, sp::SIMParams, rp::ReconParams; use_final_f
 
     GC.gc();
     return prep
+end
+
+"""
+    update_final_filter!(prep, wiener_eps)
+
+(Re-)computes the final Wiener filter `prep.final_filter` for a new regularization `wiener_eps`,
+using the reconstruction OTF and goal function stored in `prep` by `recon_sim_prepare`.
+This is cheap and allows to quickly re-apply the filter via `recon_sim_finalize`.
+"""
+function update_final_filter!(prep, wiener_eps)
+    prod(size(prep.filter_otf)) > 1 || error("prep contains no reconstruction OTF; call recon_sim_prepare first")
+    rec_otf = prep.filter_otf
+    RT = real(eltype(rec_otf))
+    ff = prep.filter_hgoal .* conj.(rec_otf) ./ (abs2.(rec_otf) .+ RT(wiener_eps))
+    prep.final_filter = rfftshift(rfft(fftshift(real.(ifft(ifftshift(ff))))))
+    return prep
+end
+
+"""
+    recon_sim_orders(sim_data, prep, sp::SIMParams)
+
+First part of `recon_sim`: separates the orders, places them into the upsampled Fourier space and sums them.
+Returns the unfiltered (centered) real-FFT result `res` (which is `prep.result_rft`) and the real-space result size `bsz`.
+For `prep.result_rft` to persist for repeated calls of `recon_sim_finalize`, `prep` has to be prepared
+with `ReconParams(double_use=false)`, since otherwise its memory is shared with the real-space result.
+"""
+function recon_sim_orders(sim_data, prep, sp::SIMParams)
+    return separate_and_place_orders(sim_data, sp, prep)
+end
+
+"""
+    recon_sim_finalize(prep, res=prep.result_rft, bsz=get_result_size(...); final_filter=prep.final_filter)
+
+Second part of `recon_sim`: applies the final frequency-dependent filter to the unfiltered Fourier-space result
+`res` and performs the inverse real-FFT. `res` is not modified, such that the filter can be changed
+(see `update_final_filter!`) and this step repeated quickly. Returns the real-space result.
+"""
+function recon_sim_finalize(prep, res=prep.result_rft, bsz=nothing; final_filter=prep.final_filter, shift=true)
+    if isnothing(bsz)
+        prod(size(prep.result)) > 1 || error("result size unknown: pass bsz or prepare with do_preallocate=true")
+        bsz = size(prep.result)
+    end
+    resf = (prod(size(final_filter)) > 1) ? res .* final_filter : copy(res)
+    res_tmp = similar(resf)
+    rifftshift!(res_tmp, resf)
+    result = irfft(res_tmp, bsz[1])
+    return shift ? fftshift(result) : result
+end
+
+"""
+    deconvolve_result(prep, res=prep.result_rft, bsz=nothing; lambda=prep.deconv_lambda, iterations=prep.deconv_iterations)
+
+Deconvolves the unfiltered reconstruction (`prep.result_rft`) with the reconstruction PSF
+(the inverse FT of `prep.filter_otf`) by iterative deconvolution with regularization strength `lambda`.
+"""
+function deconvolve_result(prep, res=prep.result_rft, bsz=nothing; lambda=prep.deconv_lambda, iterations=prep.deconv_iterations)
+    prod(size(prep.filter_otf)) > 1 || error("prep contains no reconstruction OTF; call recon_sim_prepare first")
+    mypsf = real.(ifft(ifftshift(prep.filter_otf)))
+    result = recon_sim_finalize(prep, res, bsz; final_filter=ones(Bool, 1), shift=false)
+    result, o = deconvolution(result, mypsf, regularizer=TH(), λ=lambda, loss=Gauss(), iterations=iterations, normalize_data=false, normalize_psf=false, background=prep.background);
+    return result
 end
 
 """
@@ -564,43 +621,14 @@ function recon_sim(sim_data, prep, sp::SIMParams)
 
     # apply FFT
     # and perform Fourier-placement of the orders and upsampling and summation into final ft-image
-    res, bsz = separate_and_place_orders(sim_data, sp, prep)
-    
-    # apply final frequency-dependent multiplication (filtering)
+    res, bsz = recon_sim_orders(sim_data, prep, sp)
+
+    # apply final frequency-dependent multiplication (filtering) and the inverse FT
     if (prod(size(prep.rec_otf))>1) # use deconvolution
-        # just for deconvolution we need the psf first
-        mypsf = real.(ifft(ifftshift(prep.rec_otf)))
-        res_tmp = copy(res)
-        rifftshift!(res_tmp, res)
-        result = prod(size(prep.result))>1 ? prep.result : similar(sim_data, eltype(sim_data), bsz...)
-        result .= irfft(res_tmp,  bsz[1])       # fftshift(irfft(res_tmp,  bsz[1])) 
-        iterations = 16
-        @info "deconvolving with rec_otf, iterations: $iterations"
-        # result, o = deconvolution(result, mypsf, regularizer=TH(), λ=0.0001, loss=Anscombe(100f0));
-        # result, o = deconvolution(result, mypsf, regularizer=TH(), mapping=nothing, λ=prep.deconv_lambda, loss=Gauss());
-        result, o = deconvolution(result, mypsf, regularizer=TH(), λ=prep.deconv_lambda, loss=Gauss(), iterations=iterations);
-        return result
+        @info "deconvolving with rec_otf, iterations: $(prep.deconv_iterations)"
+        return deconvolve_result(prep, res, bsz)
     else
-        if (prod(size(prep.final_filter))>1) # haskey(prep, :final_filter))
-            res .*= prep.final_filter
-        end
-        # apply IFT of the final ft-image
-
-        res_tmp = prod(size(prep.result_rft_tmp))>1 ? prep.result_rft_tmp : similar(res);
-        result = prod(size(prep.result))>1 ? prep.result : similar(sim_data, eltype(sim_data), bsz...)
-        # rec_tmp = haskey(prep, :result_tmp) ? prep.result_tmp : similar(rec)
-        rifftshift!(res_tmp, res)
-        # res_tmp = res
-        # fftshift_even!(res_tmp, 2:ndims(res_tmp))
-
-        if (prod(size(prep.plan_irfft))>=1) # isnothing(prep.plan_irfft)
-            result .= irfft(res_tmp,  bsz[1])
-        else
-            # apply an out-of-place irfft with pre-accolaed memory
-            mul!(result, prep.plan_irfft, res_tmp)
-        end
-        # once can omit the final fftshift, which will be autocompensated by the phases in Fourierspace obtaind from the delta simulation and reconstruction
-        return fftshift(result)
+        return recon_sim_finalize(prep, res, bsz)
     end
 
     # rec .= rec_tmp

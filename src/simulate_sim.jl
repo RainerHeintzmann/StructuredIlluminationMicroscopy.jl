@@ -9,7 +9,7 @@ Parameters:
 + `k0::Float64`: peak frequency of first order (relative to the Nyquist frequency of the image)
 + individual_otfs: if true, each k-shift gets its own otf index assigned in the peak generation (default: false)
 """
-function generate_peaks(num_images::Int=9, num_directions::Int=3, num_orders::Int=2, k1 = 0.9, single_zero_order=true, k1z = 0.0; use_lattice=false, lattice_shift=nothing, individual_otfs=false)
+function generate_peaks(num_images::Int=9, num_directions::Int=3, phi0=0.0, num_orders::Int=2, k1 = 0.9, single_zero_order=true, k1z = 0.0; use_lattice=false, lattice_shift=nothing, individual_otfs=false)
     num_peaks = num_directions * num_orders;
     if (single_zero_order)
         num_peaks -= num_directions - 1 
@@ -18,7 +18,7 @@ function generate_peaks(num_images::Int=9, num_directions::Int=3, num_orders::In
     current_peak = 1
     for d in 0:num_directions-1 # starts at zero
         for o in 0:num_orders-1 # starts at zero
-            phi = 2pi*d/num_directions
+            phi = pi*d/num_directions + phi0;
             k = k1 .* o
             if (o > 0 || d==0 || single_zero_order == false)
                 if (k == 0.0) # this is a zero order peak
