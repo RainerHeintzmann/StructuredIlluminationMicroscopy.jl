@@ -10,6 +10,13 @@ Parameters:
 + individual_otfs: if true, each k-shift gets its own otf index assigned in the peak generation (default: false)
 """
 function generate_peaks(num_images::Int=9, num_directions::Int=3, phi0=0.0, num_orders::Int=2, k1 = 0.9, single_zero_order=true, k1z = 0.0; use_lattice=false, lattice_shift=nothing, individual_otfs=false)
+    if use_lattice
+        # All directions in every image (sum of gratings); the images are
+        # translations p * lattice_shift (raw pixels), optimized if not given.
+        num_orders > 2 && @warn "Lattice SIM currently supports two orders; ignoring num_orders = $num_orders."
+        shifts = isnothing(lattice_shift) ? nothing : [p .* (lattice_shift[1], lattice_shift[2]) for p in 0:num_images-1]
+        return generate_lattice_peaks(ideal_lattice_kvecs(num_directions, k1, phi0); num_images=num_images, shifts=shifts)
+    end
     num_peaks = num_directions * num_orders;
     if (single_zero_order)
         num_peaks -= num_directions - 1 
@@ -35,9 +42,6 @@ function generate_peaks(num_images::Int=9, num_directions::Int=3, phi0=0.0, num_
         end
     end
 
-    if isnothing(lattice_shift) && use_lattice
-        # calculate ideal lattic shift here
-    end
     peak_phases = zeros(num_images, num_peaks)
     peak_strengths = zeros(num_images, num_peaks)
     phases_per_cycle = num_images ÷ num_directions
@@ -49,12 +53,7 @@ function generate_peaks(num_images::Int=9, num_directions::Int=3, phi0=0.0, num_
             for o in 0:num_orders-1
                 if (o > 0 || d==0 || single_zero_order == false)
                     if (o == 0 || d == current_d)
-                        if (use_lattice)
-                            my_k_vec = k_peak_pos[current_peak]
-                            peak_phases[p+1, current_peak] = exp(1îm * dot(lattice_shift, my_k_vec))
-                        else
-                            peak_phases[p+1, current_peak] = mod(2pi*o*p/phases_per_cycle, 2pi)
-                        end
+                        peak_phases[p+1, current_peak] = mod(2pi*o*p/phases_per_cycle, 2pi)
                         peak_strengths[p+1, current_peak] = 1.0
                     end
                     current_peak += 1
@@ -63,9 +62,6 @@ function generate_peaks(num_images::Int=9, num_directions::Int=3, phi0=0.0, num_
         end
     end
 
-    if use_lattice
-        peak_strength[:,1] = num_directions
-    end    
     otf_indices, otf_phases = make_3d_pattern(k_peak_pos, 0.0; individual_otfs=individual_otfs); # no offset_phase
 
     return k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases

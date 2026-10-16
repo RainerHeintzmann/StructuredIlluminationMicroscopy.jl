@@ -98,6 +98,7 @@ module StructuredIlluminationMicroscopy
     export PARA_SET, create_grating, find_grating, check_phase_steps
     export upsample_bc!, upsample_conv_lanczos!, upsampled_size, run_conv_upsample, run_conv_upsample!, conv_upsample_tullio
     export just_separate, randomize_phases
+    export ideal_lattice_kvecs, lattice_peaks, lattice_shifts, generate_lattice_peaks, generate_lattice_param
     export precompute_correlations, get_correlation_map
 
     include("h_goal.jl")    
@@ -105,6 +106,7 @@ module StructuredIlluminationMicroscopy
     include("sim_structures.jl")
     include("utils.jl")
     include("simulate_sim.jl")
+    include("lattice.jl")
     include("classical_sim.jl")
     include("parameter_estimation.jl")
     include("notch_filters.jl")
