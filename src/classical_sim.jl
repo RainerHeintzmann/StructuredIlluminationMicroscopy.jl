@@ -494,7 +494,10 @@ function recon_sim_prepare(sim_data, sp::SIMParams, rp::ReconParams; use_final_f
         rec_otf = fftshift(fft(rec_delta))
         rec_otf ./= maximum(abs.(rec_otf))
 
-        rrel = RT.(distance_transform(feature_transform(Array(abs.(rec_otf) .< rp.hgoal_thresh))))
+        # The footprint threshold must stay above the round-off floor of rec_otf (~1e-8 for Float32),
+        # otherwise numerical noise decides the footprint and thus the goal function.
+        hgoal_thresh = max(rp.hgoal_thresh, 10 * eps(real(RT)))
+        rrel = RT.(distance_transform(feature_transform(Array(abs.(rec_otf) .< hgoal_thresh))))
         rrel .= 1 .- rrel/maximum(abs.(rrel))
         h_goal = rp.hgoal.(rrel)
 
