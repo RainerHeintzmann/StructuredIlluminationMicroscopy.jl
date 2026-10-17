@@ -71,7 +71,7 @@ module StructuredIlluminationMicroscopy
     using LinearAlgebra # for dot
     using NDTools  # select_region!
     using Noise # for poisson simulation
-    using Images # for distance transform
+    using ImageMorphology: feature_transform, distance_transform # for the hgoal footprint (the Images umbrella is too heavy for app builds)
     using SeparableFunctions
     using Statistics # for mean
     using FindShift # for subpixel correlation
