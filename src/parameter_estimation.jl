@@ -29,6 +29,11 @@ The function returns the estimated parameters for the SIM image.
 - `peak_ref`: should be `nothing`, except if this was already precomputed using the function `precompute_correlations`.
 - `corr_psf`: should be `nothing`, except if this was already precomputed using the function `precompute_correlations`.
 - `cropped`: should be `nothing`, except if this was already precomputed using the function `precompute_correlations`.
+- `method`, `scale`, `roi_size`: peak localization method of FindShift's `get_subpixel_correl` (`:FindIter` default,
+    `:FindZoomFT`, `:FindParabola`, `:FindCOM`, `:FindWaveFit`) and the zoom settings of `:FindZoomFT`.
+- `normalize_overlap`: if true, the correlation is divided by its spectral-overlap envelope before the peak is
+    located (see FindShift's `get_subpixel_correl`). Removes the bias of the peak towards zero frequency,
+    e.g. for peaks beyond the OTF cutoff (TIRF). Default is `false`.
 
 # Returns
 - `sp`: The estimated parameters for the SIM image. This is a `SIMParams` object containing the estimated parameters.
@@ -39,7 +44,8 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
                             subtract_mean=true, upsample=false, suppress_sigma=0.15, 
                             num_directions=0, ideal_strength=true, implied_higher_orders=0,
                             otf_exponent = 1.0, otf_moebius = 1.0, amp_magnitudes=nothing, individual_otfs=false,
-                            show_quality=true, notch_filter=nothing, verbose=true, phase_only=false, method=:FindIter, scale = 200, roi_size = 2)
+                            show_quality=true, notch_filter=nothing, verbose=true, phase_only=false, method=:FindIter, scale = 200, roi_size = 2,
+                            normalize_overlap=false)
     if (num_directions > 0)
         num_phases = size(dat, ndims(dat)) ÷ num_directions;
         if num_phases * num_directions != size(dat, ndims(dat))
@@ -60,7 +66,8 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
                                             subtract_mean=subtract_mean, suppress_sigma=suppress_sigma, 
                                             num_directions=0, ideal_strength=ideal_strength, implied_higher_orders=implied_higher_orders,
                                             amp_magnitudes=amp_magnitudes, otf_exponent=otf_exponent, otf_moebius = otf_moebius, individual_otfs=individual_otfs,
-                                            show_quality=show_quality, notch_filter=notch_filter, verbose=verbose, phase_only=phase_only, method=method, scale=scale, roi_size=roi_size)
+                                            show_quality=show_quality, notch_filter=notch_filter, verbose=verbose, phase_only=phase_only, method=method, scale=scale, roi_size=roi_size,
+                                            normalize_overlap=normalize_overlap)
             if (d == 1)
                 spf = spf_sub
             else
@@ -114,10 +121,10 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
 
     if isnothing(k_vecs)
         # let the user interactively select the initial k vectors:
-        k_vecs, _, _ = get_subpixel_correl(peak_ref; other=refdat, psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=true, show_quality=show_quality, phase_only=phase_only, method=method, scale=scale, roi_size=roi_size)
+        k_vecs, _, _ = get_subpixel_correl(peak_ref; other=refdat, psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=true, show_quality=show_quality, phase_only=phase_only, method=method, scale=scale, roi_size=roi_size, normalize_overlap=normalize_overlap)
         println("You can call this function with the k_vecs parameter $(k_vecs) to speed up the estimation.")
     else
-        k_vecs, _, _ = get_subpixel_correl(peak_ref; other=refdat, k_est = k_vecs,  psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=false, show_quality=show_quality, phase_only=phase_only, method=method, scale=scale, roi_size=roi_size)
+        k_vecs, _, _ = get_subpixel_correl(peak_ref; other=refdat, k_est = k_vecs,  psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=false, show_quality=show_quality, phase_only=phase_only, method=method, scale=scale, roi_size=roi_size, normalize_overlap=normalize_overlap)
     end
 
     # find_shift(dat[:,:,1], dat[:,:,1])
