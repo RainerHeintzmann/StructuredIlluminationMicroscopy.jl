@@ -34,6 +34,8 @@ The function returns the estimated parameters for the SIM image.
 - `normalize_overlap`: if true, the correlation is divided by its spectral-overlap envelope before the peak is
     located (see FindShift's `get_subpixel_correl`). Removes the bias of the peak towards zero frequency,
     e.g. for peaks beyond the OTF cutoff (TIRF). Default is `false`.
+- `refine`: if false, the (subpixel) peak positions `k_vecs` are used as given and only the phases and strengths
+    are estimated, e.g. for peaks whose positions follow from other, better measurable peaks. Default is `true`.
 
 # Returns
 - `sp`: The estimated parameters for the SIM image. This is a `SIMParams` object containing the estimated parameters.
@@ -45,7 +47,7 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
                             num_directions=0, ideal_strength=true, implied_higher_orders=0,
                             otf_exponent = 1.0, otf_moebius = 1.0, amp_magnitudes=nothing, individual_otfs=false,
                             show_quality=true, notch_filter=nothing, verbose=true, phase_only=false, method=:FindIter, scale = 200, roi_size = 2,
-                            normalize_overlap=false)
+                            normalize_overlap=false, refine=true)
     if (num_directions > 0)
         num_phases = size(dat, ndims(dat)) ÷ num_directions;
         if num_phases * num_directions != size(dat, ndims(dat))
@@ -67,7 +69,7 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
                                             num_directions=0, ideal_strength=ideal_strength, implied_higher_orders=implied_higher_orders,
                                             amp_magnitudes=amp_magnitudes, otf_exponent=otf_exponent, otf_moebius = otf_moebius, individual_otfs=individual_otfs,
                                             show_quality=show_quality, notch_filter=notch_filter, verbose=verbose, phase_only=phase_only, method=method, scale=scale, roi_size=roi_size,
-                                            normalize_overlap=normalize_overlap)
+                                            normalize_overlap=normalize_overlap, refine=refine)
             if (d == 1)
                 spf = spf_sub
             else
@@ -123,6 +125,8 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
         # let the user interactively select the initial k vectors:
         k_vecs, _, _ = get_subpixel_correl(peak_ref; other=refdat, psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=true, show_quality=show_quality, phase_only=phase_only, method=method, scale=scale, roi_size=roi_size, normalize_overlap=normalize_overlap)
         println("You can call this function with the k_vecs parameter $(k_vecs) to speed up the estimation.")
+    elseif !refine
+        k_vecs = [(Float64(k[1]), Float64(k[2])) for k in k_vecs]
     else
         k_vecs, _, _ = get_subpixel_correl(peak_ref; other=refdat, k_est = k_vecs,  psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=false, show_quality=show_quality, phase_only=phase_only, method=method, scale=scale, roi_size=roi_size, normalize_overlap=normalize_overlap)
     end
