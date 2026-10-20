@@ -257,15 +257,20 @@ function SIMPattern(h, sp::SIMParams, n, otf_num)
 end
 
 """
-    make_3d_pattern!(k_peak_pos, offset_phase=0.0; individual_otfs=false)
+    make_3d_pattern(k_peak_pos, offset_phase=0.0; individual_otfs=false)
 
-fills the sp.otf_indices and sp.otf_phases arrays with sensible values for a 3D pattern.
+Returns `otf_indices, otf_phases` with sensible values for a 3D pattern: peaks
+without an axial component use OTF 1, the peaks of each distinct axial
+frequency `k[3]` share one further OTF (2, 3, ...; one OTF 2 when all axially
+modulated peaks have the same `k[3]`, as in classical 3-beam SIM). `offset_phase`
+is the axial phase of the modulation (the pattern's z position relative to the
+focal plane), a number for all axially modulated peaks or a vector per peak.
 """
 function make_3d_pattern(k_peak_pos, offset_phase=0.0; individual_otfs=false)
     num_peaks = length(k_peak_pos)
-    has_kz(p) = (p[3] != 0.0) 
+    has_kz(p) = (p[3] != 0.0)
 
-    otf_indices = let 
+    otf_indices = let
         if (individual_otfs)
             collect(1:length(k_peak_pos))
         else
@@ -273,10 +278,17 @@ function make_3d_pattern(k_peak_pos, offset_phase=0.0; individual_otfs=false)
         end
     end
     if !(individual_otfs)
-        otf_indices[has_kz.(k_peak_pos)] .= 2
+        kzs = Float64[]          # distinct axial frequencies, in order of appearance
+        for (i, p) in enumerate(k_peak_pos)
+            has_kz(p) || continue
+            j = findfirst(k -> isapprox(k, p[3]; rtol=1e-9, atol=1e-12), kzs)
+            j === nothing && (push!(kzs, p[3]); j = length(kzs))
+            otf_indices[i] = 1 + j
+        end
     end
 
     otf_phases = zeros(Float64, num_peaks)
-    otf_phases[has_kz.(k_peak_pos)] .= offset_phase
+    sel = has_kz.(k_peak_pos)
+    otf_phases[sel] .= offset_phase isa AbstractVector ? offset_phase[sel] : offset_phase
     return otf_indices, otf_phases
 end

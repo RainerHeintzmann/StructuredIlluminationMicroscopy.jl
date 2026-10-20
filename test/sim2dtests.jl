@@ -18,7 +18,7 @@ end
     # SIM illumination pattern
     num_directions = 3; num_images =  3*num_directions; num_orders = 2
     rel_peak = 0.40 # peak position relative to sampling limit on fine grid
-    k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases = generate_peaks(num_images, num_directions, num_orders, rel_peak / (num_orders-1))
+    k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases = generate_peaks(num_images, num_directions, 0.0, num_orders, rel_peak / (num_orders-1))
     @test size(k_peak_pos,1) == (num_directions +1)
     @test k_peak_pos[1] == (0.0, 0.0, 0.0)
     @test k_peak_pos[2] == (0.4, 0.0, 0.0)

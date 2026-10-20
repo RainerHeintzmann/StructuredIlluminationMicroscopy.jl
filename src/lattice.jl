@@ -55,8 +55,21 @@ the same peak, while the positions are taken from `k_vecs`. Peaks that coincide
 exactly for the ideal vectors (e.g. `k_1 + k_3 = k_2` for three directions at
 60° with a zero-order beam) then stay one peak for slightly different measured
 or pixel-rounded `k_vecs`, which could not be unmixed as separate peaks anyway.
+
+`k0 = (k0x, k0y, k0z)`: radius n/λ (excitation) of the Ewald sphere relative to
+the Nyquist frequency of each axis (`2 .* sampling ./ (λ / n)`, as in `get_kz`).
+Each beam then lies on the sphere (the central beam on the axis), and a beam
+pair also has the axial frequency difference `Kz = kz_a - kz_b`; the third
+component of each peak is its axial frequency (relative to the axial Nyquist),
+as `k1z` in `generate_peaks`. A central-side pair gives the first order its
+axial modulation: the pairs (side, centre) and (centre, opposite side) produce
+`±Kz`, together `cos(Kz z + φz)` (as in three-beam 3-D SIM). Side beams on the
+same cone (equal |k_d|) interfere laterally (`Kz = 0`). Peaks whose beam pairs
+have different |Kz| (e.g. unequal |k_d|, or coinciding peaks) get the |Kz| of
+the strongest contribution, with a warning: the per-order axial frequency can
+then be refined from the data. Without `k0` all peaks are lateral (2-D).
 """
-function lattice_peaks(k_vecs; coherent::Bool=false, zero_beam::Real=0, layout=k_vecs)
+function lattice_peaks(k_vecs; coherent::Bool=false, zero_beam::Real=0, layout=k_vecs, k0=nothing)
     kv = [(Float64(k[1]), Float64(k[2])) for k in k_vecs]
     lv0 = [(Float64(k[1]), Float64(k[2])) for k in layout]
     length(lv0) == length(kv) || throw(ArgumentError("layout needs one k-vector per direction ($(length(kv)))."))
@@ -73,18 +86,26 @@ function lattice_peaks(k_vecs; coherent::Bool=false, zero_beam::Real=0, layout=k
     counts = Dict{NTuple{2,Float64},Float64}()
     rep = Dict{NTuple{2,Float64},NTuple{2,Float64}}()   # canonical key (of the layout) -> vector as listed
     order = NTuple{2,Float64}[]
-    add!(K, L, c) = begin
-        key = _round_k(_canonical_k(L))
+    axial = Dict{NTuple{2,Float64},Vector{NTuple{2,Float64}}}()   # key -> (Kz, weight) of each pair, sign of `rep`
+    add!(K, L, c, Kz=0.0) = begin
+        cl = _canonical_k(L)
+        key = _round_k(cl)
         if !haskey(counts, key)
             counts[key] = 0.0
             rep[key] = K
             push!(order, key)
+            axial[key] = NTuple{2,Float64}[]
         end
         counts[key] += c
+        # the pair at -L describes the same peak with -Kz
+        c > 0 && push!(axial[key], (cl == L ? Kz : -Kz, c))
     end
     for (k, l) in zip(kv, lv)   # list the first orders first, with the given sign
         add!(k, l, 0.0)
     end
+    # axial component of a beam at lateral position q on the Ewald sphere
+    beam_kz(q) = k0 === nothing ? 0.0 :
+        k0[3] * sqrt(max(0.0, 1.0 - (q[1] / k0[1])^2 - (q[2] / k0[2])^2))
     # Beams (position, layout position, amplitude) of each mutually coherent
     # group: all beams (coherent) or the beams of each grating (sum of
     # gratings). Zero order blocked: ±k_d/2; otherwise the central beam and ±k_d.
@@ -100,7 +121,7 @@ function lattice_peaks(k_vecs; coherent::Bool=false, zero_beam::Real=0, layout=k
         if hypot(L...) < 1e-9
             zero += A * B
         else
-            add!(qa .- qb, L, A * B)   # (a,b) and (b,a) both land on the same ±K key
+            add!(qa .- qb, L, A * B, beam_kz(qa) - beam_kz(qb))   # (a,b) and (b,a) both land on the same ±K key
         end
     end
     # Intensity = Σ_ab A_a A_b exp(i (q_a - q_b)⋅x): the zero order counts the
@@ -111,12 +132,36 @@ function lattice_peaks(k_vecs; coherent::Bool=false, zero_beam::Real=0, layout=k
     keys_used = [key for key in order if counts[key] > 0]
     k_peak_pos = NTuple{3,Float64}[(0.0, 0.0, 0.0)]
     strengths = Float64[zero_strength]
+    approximated = String[]
     for key in keys_used
         K = rep[key]
-        push!(k_peak_pos, (K[1], K[2], 0.0))
+        kz, exact = _peak_axial(axial[key])
+        exact || push!(approximated, "($(round(K[1]; digits=3)), $(round(K[2]; digits=3)))")
+        push!(k_peak_pos, (K[1], K[2], kz))
         push!(strengths, strengths_of(key))
     end
+    isempty(approximated) ||
+        @warn "Lattice peaks with beam pairs of different axial frequencies, modelled with the strongest |Kz| (cos(Kz z) modulation): $(join(approximated, ", "))."
     return k_peak_pos, strengths
+end
+
+# Axial frequency of a lattice peak from its beam pairs ((Kz, weight) each):
+# 0 if all pairs are lateral; |Kz| if all have the same |Kz| with equal weights
+# at +Kz and -Kz (an exact cos(Kz z + φz) modulation); otherwise the |Kz| of the
+# strongest group, flagged as approximate (`exact == false`).
+function _peak_axial(contribs; tol=1e-9)
+    groups = Tuple{Float64,Float64,Float64}[]   # (|Kz|, weight at +, weight at -)
+    for (z, w) in contribs
+        a = abs(z) < tol ? 0.0 : abs(z)
+        j = findfirst(g -> isapprox(g[1], a; rtol=1e-6, atol=tol), groups)
+        j === nothing && (push!(groups, (a, 0.0, 0.0)); j = length(groups))
+        g = groups[j]
+        groups[j] = z >= 0 ? (g[1], g[2] + w, g[3]) : (g[1], g[2], g[3] + w)
+    end
+    isempty(groups) && return 0.0, true
+    best = argmax(g -> g[2] + g[3], groups)
+    exact = length(groups) == 1 && (best[1] == 0.0 || isapprox(best[2], best[3]; rtol=1e-6))
+    return best[1], exact
 end
 
 # Weight matrix (images × peaks) for the given translations, as `weight_matrix`.
@@ -170,17 +215,22 @@ function lattice_shifts(k_peak_pos, strengths; scan::Symbol=:line, num_images::I
 end
 
 """
-    generate_lattice_peaks(k_vecs; coherent=false, zero_beam=0, layout=k_vecs, scan=:line, num_images=0, raster=(3, 3), shifts=nothing)
+    generate_lattice_peaks(k_vecs; coherent=false, zero_beam=0, layout=k_vecs, k0=nothing, axial_phase=0.0,
+                           scan=:line, num_images=0, raster=(3, 3), shifts=nothing)
 
 Like `generate_peaks`, but for a lattice illumination (see `lattice_peaks` and
 `lattice_shifts`). Pass `shifts` (one (x, y) translation in raw pixels per image)
-to use given translations instead of the optimized ones.
+to use given translations instead of the optimized ones. With `k0` (see
+`lattice_peaks`) the peaks get their axial frequencies for 3-D data; peaks with
+the same axial frequency share an axially modulated OTF (`make_3d_pattern`), and
+`axial_phase` is the phase of that modulation (the pattern's z position relative
+to the focal plane; a number or one value per peak).
 
 Returns `k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases`.
 """
-function generate_lattice_peaks(k_vecs; coherent::Bool=false, zero_beam::Real=0, layout=k_vecs, scan::Symbol=:line,
-                                num_images::Integer=0, raster=(3, 3), shifts=nothing)
-    k_peak_pos, strengths = lattice_peaks(k_vecs; coherent=coherent, zero_beam=zero_beam, layout=layout)
+function generate_lattice_peaks(k_vecs; coherent::Bool=false, zero_beam::Real=0, layout=k_vecs, k0=nothing,
+                                axial_phase=0.0, scan::Symbol=:line, num_images::Integer=0, raster=(3, 3), shifts=nothing)
+    k_peak_pos, strengths = lattice_peaks(k_vecs; coherent=coherent, zero_beam=zero_beam, layout=layout, k0=k0)
     if isnothing(shifts)
         shifts, quality = lattice_shifts(k_peak_pos, strengths; scan=scan, num_images=num_images, raster=raster)
     else
@@ -191,7 +241,7 @@ function generate_lattice_peaks(k_vecs; coherent::Bool=false, zero_beam::Real=0,
         @warn "Lattice SIM with $(length(k_peak_pos)) peaks needs at least $nmin images to unmix all orders, got $(length(shifts))."
     quality < 1e-3 && @warn "Lattice translations unmix the orders poorly (conditioning quality $(round(quality; sigdigits=3)))."
     peak_phases, peak_strengths = _lattice_weights(k_peak_pos, strengths, shifts)
-    otf_indices, otf_phases = make_3d_pattern(k_peak_pos, 0.0)
+    otf_indices, otf_phases = make_3d_pattern(k_peak_pos, axial_phase)
     return k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases
 end
 

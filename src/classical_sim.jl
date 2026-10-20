@@ -141,17 +141,22 @@ function get_otfs(ACT, sz, sp::SIMParams, use_rft = false)
         if (length(sz) > 2 && sz[3] > 1)
             zz(RT, (1,1, sz[3]))
         else
-            1
+            0 # 2-D: the focal plane (z = 0) of the axially modulated pattern
         end
     end
-    hm = mypsf
-    for i in eachindex(otfs)
-        kz = pi*sp.k_peak_pos[i][3]
-        if (kz != 0.0) # shift to +/- kz position and account for the z-related misadjustment via peak_phase:
-            hm = mypsf .* cos.(pz .* kz .+sp.peak_phases[i]); # Division by two to account for zero order(s) being twice as strong
+    for o in eachindex(otfs)
+        # The axial frequency and the axial phase (the pattern's z position
+        # relative to the focal plane, `sp.otf_phases`) of OTF number `o` are
+        # those of the peaks using it (`sp.otf_indices`), not of peak number `o`.
+        i = findfirst(==(o), sp.otf_indices)
+        kz = isnothing(i) ? 0.0 : pi*sp.k_peak_pos[i][3]
+        hm = if (kz != 0.0) # shift to +/- kz position and account for the z-related misadjustment via the axial phase:
+            mypsf .* cos.(pz .* kz .+ sp.otf_phases[i])
+        else
+            mypsf
         end
         myotf = (use_rft) ? rfft(ifftshift(hm)) : fftshift(fft(ifftshift(hm)))
-        otfs[i] = myotf
+        otfs[o] = myotf
     end
     return otfs
 end
@@ -430,7 +435,7 @@ end
 
 
 """
-    recon_sim_prepare(sim_data, sp::SIMParams, rp::ReconParams)
+    recon_sim_prepare(sim_data, sp::SIMParams, rp::ReconParams; use_final_filter=true, force_otf_calculation=false)
 
 Prepare the SIM reconstruction by generating the OTFs, calculating the pseudo-inverse of the weight matrix,
 and preallocating memory for the reconstruction.
@@ -439,9 +444,13 @@ Parameters:
 + `sim_data::Array` : simulated SIM data
 + `sp::SIMParams` : SIM configuration parameters 
 + `rp::ReconParams` : Reconstruction parameters. See the help for ReconParams for more information.
++ `use_final_filter` : compute the final (Wiener) filter `prep.final_filter`
++ `force_otf_calculation` : compute the reconstruction OTF (`prep.filter_otf`, `prep.filter_hgoal`) even
+  without a final filter or deconvolution, so that either can be applied later
+  (`update_final_filter!` + `recon_sim_finalize`, or `deconvolve_result`) without preparing again.
 
 """
-function recon_sim_prepare(sim_data, sp::SIMParams, rp::ReconParams; use_final_filter=true)
+function recon_sim_prepare(sim_data, sp::SIMParams, rp::ReconParams; use_final_filter=true, force_otf_calculation=false)
     ACT = complex_arr_type(typeof(sim_data), Val(ndims(sim_data)-1)) # typeof(sim_data[ids...] .+ 0im)
     ART = real_arr_type(typeof(sim_data), Val(ndims(sim_data)-1)) # typeof(sim_data[ids...] .+ 0im)
     prep = PreparationParams(ART)
@@ -451,7 +460,7 @@ function recon_sim_prepare(sim_data, sp::SIMParams, rp::ReconParams; use_final_f
         if (rp.slice_by_slice && length(imsz)>2 && imsz[3] > 1)
             reference_slice = (rp.reference_slice == 0) ? imsz[3] ÷ 2 + 1 : rp.reference_slice
             sim_data = sim_data[:,:,reference_slice,:]
-            prep = recon_sim_prepare(sim_data, sp, rp)
+            prep = recon_sim_prepare(sim_data, sp, rp; use_final_filter=use_final_filter, force_otf_calculation=force_otf_calculation)
             return prep
         end
 
@@ -480,7 +489,7 @@ function recon_sim_prepare(sim_data, sp::SIMParams, rp::ReconParams; use_final_f
 
         dobj = collect(delta(eltype(sim_data), size(sim_data)[1:end-1]))  # , offset=CtrFFT)
         
-        if (! rp.do_deconvolve && !use_final_filter)
+        if (! rp.do_deconvolve && !use_final_filter && !force_otf_calculation)
             GC.gc();
             return prep
         end
@@ -571,16 +580,25 @@ function recon_sim_finalize(prep, res=prep.result_rft, bsz=nothing; final_filter
 end
 
 """
-    deconvolve_result(prep, res=prep.result_rft, bsz=nothing; lambda=prep.deconv_lambda, iterations=prep.deconv_iterations)
+    deconvolve_result(prep, res=prep.result_rft, bsz=nothing; lambda=prep.deconv_lambda, iterations=prep.deconv_iterations,
+                      relative_background=nothing)
 
 Deconvolves the unfiltered reconstruction (`prep.result_rft`) with the reconstruction PSF
 (the inverse FT of `prep.filter_otf`) by iterative deconvolution with regularization strength `lambda`.
+
+`relative_background`: the background contained in the (offset-subtracted) data, as a fraction of their
+mean, e.g. out-of-focus light. It is modelled as the background of the forward model (data = object ⊛ PSF +
+background) at the same fraction of the reconstruction's mean, so it is not attributed to the object.
+(A camera offset should instead be subtracted from the data beforehand.) Without it, `prep.background`
+(in the units of the reconstruction) is used.
 """
-function deconvolve_result(prep, res=prep.result_rft, bsz=nothing; lambda=prep.deconv_lambda, iterations=prep.deconv_iterations)
+function deconvolve_result(prep, res=prep.result_rft, bsz=nothing; lambda=prep.deconv_lambda, iterations=prep.deconv_iterations,
+                           relative_background=nothing)
     prod(size(prep.filter_otf)) > 1 || error("prep contains no reconstruction OTF; call recon_sim_prepare first")
     mypsf = real.(ifft(ifftshift(prep.filter_otf)))
     result = recon_sim_finalize(prep, res, bsz; final_filter=ones(Bool, 1), shift=false)
-    result, o = deconvolution(result, mypsf, regularizer=TH(), λ=lambda, loss=Gauss(), iterations=iterations, normalize_data=false, normalize_psf=false, background=prep.background);
+    background = isnothing(relative_background) ? prep.background : relative_background * sum(result) / length(result)
+    result, o = deconvolution(result, mypsf, regularizer=TH(), λ=lambda, loss=Gauss(), iterations=iterations, normalize_data=false, normalize_psf=false, background=background);
     return result
 end
 
@@ -602,7 +620,8 @@ Parameters:
 + `sp::SIMParams` : SIMParams object
 
 """
-function recon_sim(sim_data, prep, sp::SIMParams)
+function recon_sim(sim_data, prep, sp::SIMParams; relative_background=nothing)
+    # relative_background: see `deconvolve_result` (only used with deconvolution)
     sz = size(sim_data)
     imsz = sz[1:end-1]
 
@@ -610,7 +629,7 @@ function recon_sim(sim_data, prep, sp::SIMParams)
     if (prep.slice_by_slice && length(imsz)>2 && imsz[3] > 1)
         rec = similar(sim_data, eltype(sim_data), (size(prep.result)..., size(sim_data,3)))
         for z in axes(sim_data, 3)
-            rec[:,:,z] .= recon_sim(sim_data[:,:,z,:], prep, sp)
+            rec[:,:,z] .= recon_sim(sim_data[:,:,z,:], prep, sp; relative_background=relative_background)
         end
         return rec
     end
@@ -629,7 +648,7 @@ function recon_sim(sim_data, prep, sp::SIMParams)
     # apply final frequency-dependent multiplication (filtering) and the inverse FT
     if (prod(size(prep.rec_otf))>1) # use deconvolution
         @info "deconvolving with rec_otf, iterations: $(prep.deconv_iterations)"
-        return deconvolve_result(prep, res, bsz)
+        return deconvolve_result(prep, res, bsz; relative_background=relative_background)
     else
         return recon_sim_finalize(prep, res, bsz)
     end

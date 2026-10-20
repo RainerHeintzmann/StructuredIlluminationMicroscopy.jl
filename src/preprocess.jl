@@ -62,11 +62,17 @@ function remove_oof_light(dat; psf3d, if_slices=7, myeps = 0.001)
 end
 
 """
-    preprocess_sim(dat; bg = 100f0, num_directions=nothing)
+    preprocess_sim(dat; bg = 100f0, num_directions=nothing, reg_const=2f0, correct_drift=true, enforce_mean=true,
+                   verbose=false, damp_edge=true, zero_clip=false)
 
-Preprocesses the data for SIM analysis by subtracting a background value and normalizing the data.
+Preprocesses the data for SIM analysis by subtracting a background value and normalizing the data:
+the brightness of every image is normalized to the mean, `damp_edge` damps the image edges,
+`correct_drift` registers the directions to each other, `enforce_mean` makes the mean over the
+phases of every direction equal to the overall mean, and `zero_clip` finally clips negative values
+(e.g. from the background subtraction, the drift interpolation or the mean enforcement) to zero.
 """
-function preprocess_sim(dat; bg = 100f0, num_directions=nothing, reg_const=2f0, correct_drift=true, enforce_mean=true, verbose=false, damp_edge=true)
+function preprocess_sim(dat; bg = 100f0, num_directions=nothing, reg_const=2f0, correct_drift=true, enforce_mean=true, verbose=false, damp_edge=true,
+                        zero_clip=false)
     dat = dat .- bg # copies
     # correct slice brightness fluctuations
     dat .*= mean(dat) ./ mean(dat, dims=(1:ndims(dat)-1))
@@ -95,5 +101,6 @@ function preprocess_sim(dat; bg = 100f0, num_directions=nothing, reg_const=2f0, 
             end
         end
     end
+    zero_clip && (dat .= max.(dat, zero(eltype(dat))))
     return dat
 end

@@ -28,8 +28,8 @@ end
 begin
 	# SIM illumination pattern
     num_directions = 3; num_orders = 3; num_images =  (1 + 2*(num_orders-1))*num_directions; 
-    rel_peak = 0.1879 # peak position relative to sampling limit on fine grid
-    k1z = get_kz(pp, sampling, rel_peak)
+    rel_peak = 2 * 0.1879 # highest (second) order position relative to the sampling limit on the fine grid (= side-beam separation)
+    k1z = get_kz(pp, sampling, rel_peak / (num_orders-1)) # axial frequency of the first orders
     k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases = generate_peaks(num_images, num_directions, num_orders, rel_peak / (num_orders-1), true, k1z)
     num_photons = 0.0
     spf = SIMParams(pp, sampling, num_photons, 100.0, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases)

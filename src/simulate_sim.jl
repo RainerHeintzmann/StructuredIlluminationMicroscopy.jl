@@ -85,25 +85,27 @@ end
 """
     get_kz(pp, sampling, k1)
 
-estimate the kz positions of the peaks, by assuming that they reside on the perfect excitation OTF outer border
+Axial frequency (relative to the axial Nyquist frequency) of a first-order peak
+of three-beam SIM: the interference of the central (zero-order) beam on the
+optical axis with a side beam whose lateral frequency is `k1`. Both beams lie
+on the Ewald sphere of radius n/λ, so the side beam is tilted by θ with
+sin θ = k1 / k0 and the axial difference is k0_z (1 - cos θ).
 
-Note that the x-sampling is assumed to be the same as the y-sampling
+Note that the x-sampling is assumed to be the same as the y-sampling.
 Parameters:
-+ `pp::PSFParams` : PSFParams object
-+ `sampling::NTuple` : pixel pitch samplings
-+ k1: lateral frequency of the first order peak relativ to Nyquist (assumed to be integerence of zero with first amplitude order) 
++ `pp::PSFParams` : PSFParams object; its `λ` should be the excitation wavelength and `n` the refractive index
++ `sampling::NTuple` : pixel pitch samplings (x, y, z)
++ `k1` : lateral frequency of the first-order peak relative to the lateral Nyquist frequency
+         (the interference of the zero order with one first amplitude order)
 
 """
 function get_kz(pp, sampling::NTuple, k1)
-    k0 = 2 .* sampling ./ (pp.λ / pp.n) # radius of the Ewald sphere in the x, y, z directions relative to Nqyuist  
-    sin_alpha = pp.NA / pp.n #  k1 / k0[1]
-    sin_alpha_prime = sin_alpha - k1 / k0[1]
-    if (sin_alpha_prime > 1.0)
+    k0 = 2 .* sampling ./ (pp.λ / pp.n) # radius of the Ewald sphere in the x, y, z directions relative to Nyquist
+    sin_theta = k1 / k0[1]
+    if (sin_theta > 1.0)
         error("The peak frequency is too high for the given sampling, wavelength and refractive index. Reduce the peak frequency or increase the sampling.")
     end
-    kz = (cos(asin(sin_alpha_prime)) - cos(asin(sin_alpha))) * k0[3]
-    # kz = (1.0 - sqrt(1 - sin_alpha^2)) / k0[3]
-    return kz
+    return (1.0 - sqrt(1.0 - sin_theta^2)) * k0[3]
 end
 
 """

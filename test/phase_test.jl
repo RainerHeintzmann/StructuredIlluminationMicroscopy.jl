@@ -1,9 +1,9 @@
 
 num_directions = 3; num_phases = 3; num_images =  num_phases*num_directions; num_orders = 2
 rel_peak = 0.4 # peak position relative to sampling limit on fine grid
-# k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases = generate_peaks(num_images, num_directions, num_orders, rel_peak / (num_orders-1))
+# k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases = generate_peaks(num_images, num_directions, 0.0, num_orders, rel_peak / (num_orders-1))
 # spf = SIMParams(mypsf, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases);
-sp = generate_peaks_param(mypsf, num_images, num_directions, num_orders, rel_peak / (num_orders-1))
+sp = generate_peaks_param(mypsf, num_images, num_directions, 0.0, num_orders, rel_peak / (num_orders-1))
 
 msp = randomize_phases(sp, 1.2) # 
 # msp = SIMParams(sp)

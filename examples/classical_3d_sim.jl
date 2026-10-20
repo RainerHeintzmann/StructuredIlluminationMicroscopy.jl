@@ -15,7 +15,7 @@ function main()
     pp = PSFParams(lambda, NA, n);  # 532 nm, NA 0.25 in Water n= 1.33
     sampling = (0.05, 0.05, 0.08)  # sampling in the orginal (high-res.) simulation grid. Should be at least twice as good as needed along XY.
     obj_sz = (512, 512, 128)
-    obj = filaments3D(Float32, obj_sz);
+    obj = filaments(Float32, obj_sz);
     mypsf = psf(obj_sz, pp; sampling=sampling)
     downsample_factor = 2 # is only applied in XY, not in Z
     # detection_sz = (obj_sz[1] ÷ downsample_factor, obj_sz[2] ÷ downsample_factor, obj_sz[3]) # size of the detection grid
@@ -25,9 +25,9 @@ function main()
 
     # SIM illumination pattern
     num_directions = 3; num_orders = 3; num_images =  (1 + 2*(num_orders-1))*num_directions; 
-    rel_peak = 0.1879 # peak position relative to sampling limit on fine grid
-    k1z = get_kz(pp, sampling, rel_peak)
-    spf = generate_peaks_param(mypsf, num_images, num_directions, num_orders, rel_peak / (num_orders-1), true, k1z)
+    rel_peak = 2 * 0.1879 # highest (second) order position relative to the sampling limit on the fine grid (= side-beam separation)
+    k1z = get_kz(pp, sampling, rel_peak / (num_orders-1)) # axial frequency of the first orders (central beam with one side beam)
+    spf = generate_peaks_param(mypsf, num_images, num_directions, 0.0, num_orders, rel_peak / (num_orders-1), true, k1z)
 
     num_photons = 100.0
     @time sim_data, sp = simulate_sim(obj, spf, downsample_factor; n_photons=num_photons);
