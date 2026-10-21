@@ -47,6 +47,15 @@ orders `2 k_d` and, for `coherent=true`, the mixed peaks `±k_i ± k_j`. For
 The strength of a peak is the sum of the amplitude products of the beam pairs
 producing it (the number of pairs, for equal amplitudes).
 
+`num_orders` (default `nothing`: the beam model above): the illumination's
+intensity harmonics, as `num_orders` in `generate_peaks` (orders 0 … `num_orders`-1
+of each grating, the `k_d` being the first orders). `coherent=true`: the pattern
+is the product of the gratings (e.g. a square grating), with all peaks
+`Σ_d n_d k_d` for `|n_d| ≤ num_orders - 1`; `coherent=false`: the sum of the
+gratings, with the harmonics `n k_d` of each direction only. All strengths are 1
+(as for classical SIM; measurable by the estimation), all peaks lateral, and
+`zero_beam` is not used (the positions follow from the `k_d`).
+
 Returns `(k_peak_pos, strengths)`: the zero order first, then the `k_d` in the
 given order, then any mixed or higher peaks. Only one of `±K` is listed.
 
@@ -69,7 +78,7 @@ have different |Kz| (e.g. unequal |k_d|, or coinciding peaks) get the |Kz| of
 the strongest contribution, with a warning: the per-order axial frequency can
 then be refined from the data. Without `k0` all peaks are lateral (2-D).
 """
-function lattice_peaks(k_vecs; coherent::Bool=false, zero_beam::Real=0, layout=k_vecs, k0=nothing)
+function lattice_peaks(k_vecs; coherent::Bool=false, zero_beam::Real=0, layout=k_vecs, k0=nothing, num_orders=nothing)
     kv = [(Float64(k[1]), Float64(k[2])) for k in k_vecs]
     lv0 = [(Float64(k[1]), Float64(k[2])) for k in layout]
     length(lv0) == length(kv) || throw(ArgumentError("layout needs one k-vector per direction ($(length(kv)))."))
@@ -102,6 +111,31 @@ function lattice_peaks(k_vecs; coherent::Bool=false, zero_beam::Real=0, layout=k
     end
     for (k, l) in zip(kv, lv)   # list the first orders first, with the given sign
         add!(k, l, 0.0)
+    end
+    if num_orders !== nothing
+        # intensity harmonics of the gratings (see the docstring): every coefficient
+        # vector n and its negative land on the same ±K key (count 2 per peak, halved below)
+        M = Int(num_orders) - 1
+        M >= 1 || throw(ArgumentError("num_orders must be at least 2 (orders 0 and 1)."))
+        D = length(kv)
+        coeffs = coherent ? vec([collect(t) for t in Iterators.product(ntuple(_ -> -M:M, D)...)]) :
+                            [[d == e ? m : 0 for e in 1:D] for d in 1:D for m in -M:M]
+        for n in coeffs
+            all(==(0), n) && continue
+            K = (sum(n[d] * kv[d][1] for d in 1:D), sum(n[d] * kv[d][2] for d in 1:D))
+            L = (sum(n[d] * lv[d][1] for d in 1:D), sum(n[d] * lv[d][2] for d in 1:D))
+            hypot(L...) < 1e-9 && continue      # combinations that cancel (e.g. k1 + k3 - k2 at 60°)
+            add!(K, L, 1.0)
+        end
+        keys_used = [key for key in order if counts[key] > 0]
+        k_peak_pos = NTuple{3,Float64}[(0.0, 0.0, 0.0)]
+        strengths = Float64[1.0]
+        for key in keys_used
+            K = rep[key]
+            push!(k_peak_pos, (K[1], K[2], 0.0))
+            push!(strengths, 1.0)               # equal strengths, as classical SIM
+        end
+        return k_peak_pos, strengths
     end
     # axial component of a beam at lateral position q on the Ewald sphere
     beam_kz(q) = k0 === nothing ? 0.0 :
@@ -229,8 +263,10 @@ to the focal plane; a number or one value per peak).
 Returns `k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases`.
 """
 function generate_lattice_peaks(k_vecs; coherent::Bool=false, zero_beam::Real=0, layout=k_vecs, k0=nothing,
-                                axial_phase=0.0, scan::Symbol=:line, num_images::Integer=0, raster=(3, 3), shifts=nothing)
-    k_peak_pos, strengths = lattice_peaks(k_vecs; coherent=coherent, zero_beam=zero_beam, layout=layout, k0=k0)
+                                axial_phase=0.0, scan::Symbol=:line, num_images::Integer=0, raster=(3, 3), shifts=nothing,
+                                num_orders=nothing)
+    k_peak_pos, strengths = lattice_peaks(k_vecs; coherent=coherent, zero_beam=zero_beam, layout=layout, k0=k0,
+                                          num_orders=num_orders)
     if isnothing(shifts)
         shifts, quality = lattice_shifts(k_peak_pos, strengths; scan=scan, num_images=num_images, raster=raster)
     else
