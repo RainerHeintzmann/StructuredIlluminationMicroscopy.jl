@@ -503,12 +503,7 @@ function recon_sim_prepare(sim_data, sp::SIMParams, rp::ReconParams; use_final_f
         rec_otf = fftshift(fft(rec_delta))
         rec_otf ./= maximum(abs.(rec_otf))
 
-        # The footprint threshold must stay above the round-off floor of rec_otf (~1e-8 for Float32),
-        # otherwise numerical noise decides the footprint and thus the goal function.
-        hgoal_thresh = max(rp.hgoal_thresh, 10 * eps(real(RT)))
-        rrel = RT.(distance_transform(feature_transform(Array(abs.(rec_otf) .< hgoal_thresh))))
-        rrel .= 1 .- rrel/maximum(abs.(rrel))
-        h_goal = rp.hgoal.(rrel)
+        h_goal = hgoal_filter(rec_otf, rp.hgoal, rp.hgoal_thresh)
 
         # only use this rec_otf as deconvolution OTF inside recon_sim if deconvolution is requested
         if (rp.do_deconvolve)
@@ -533,16 +528,43 @@ function recon_sim_prepare(sim_data, sp::SIMParams, rp::ReconParams; use_final_f
 end
 
 """
-    update_final_filter!(prep, wiener_eps)
+    hgoal_filter(rec_otf, hgoal, hgoal_thresh)
+
+The goal transfer function of the final Wiener filter: `hgoal` applied to the relative
+distance to the border of the footprint of the reconstruction OTF `rec_otf` (where
+`|rec_otf| ≥ hgoal_thresh`; 1 at the centre, 0 at the border). Only used by the final
+filter (`update_final_filter!`), not by the order separation or the deconvolution.
+Returns a host (CPU) array.
+"""
+function hgoal_filter(rec_otf, hgoal, hgoal_thresh)
+    RT = real(eltype(rec_otf))
+    # The footprint threshold must stay above the round-off floor of rec_otf (~1e-8 for Float32),
+    # otherwise numerical noise decides the footprint and thus the goal function.
+    thresh = max(hgoal_thresh, 10 * eps(RT))
+    rrel = RT.(distance_transform(feature_transform(Array(Array(abs.(rec_otf)) .< thresh))))
+    rrel .= 1 .- rrel/maximum(abs.(rrel))
+    return hgoal.(rrel)
+end
+
+"""
+    update_final_filter!(prep, wiener_eps; hgoal=nothing, hgoal_thresh=nothing)
 
 (Re-)computes the final Wiener filter `prep.final_filter` for a new regularization `wiener_eps`,
 using the reconstruction OTF and goal function stored in `prep` by `recon_sim_prepare`.
 This is cheap and allows to quickly re-apply the filter via `recon_sim_finalize`.
+Given `hgoal` (and optionally `hgoal_thresh`, default 2e-8), the goal function is computed
+anew (`hgoal_filter`) and stored in `prep.filter_hgoal`: the goal function belongs to the
+final filter only, so it can be changed without preparing again.
 """
-function update_final_filter!(prep, wiener_eps)
+function update_final_filter!(prep, wiener_eps; hgoal=nothing, hgoal_thresh=nothing)
     prod(size(prep.filter_otf)) > 1 || error("prep contains no reconstruction OTF; call recon_sim_prepare first")
     rec_otf = prep.filter_otf
     RT = real(eltype(rec_otf))
+    if hgoal !== nothing
+        h = hgoal_filter(rec_otf, hgoal, something(hgoal_thresh, 2e-8))
+        # same array type (and device) as before
+        prep.filter_hgoal = copyto!(similar(prep.filter_hgoal, size(h)), eltype(prep.filter_hgoal).(h))
+    end
     ff = prep.filter_hgoal .* conj.(rec_otf) ./ (abs2.(rec_otf) .+ RT(wiener_eps))
     prep.final_filter = rfftshift(rfft(fftshift(real.(ifft(ifftshift(ff))))))
     return prep
