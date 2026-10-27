@@ -20,17 +20,24 @@ function main()
     end
     mypsf = psf(size(obj), pp, sampling=sampling)
 
-    # SIM illumination pattern
-    num_directions = 3; num_images =  3*num_directions; num_orders = 2
-    rel_peak = 0.40 # peak position relative to sampling limit on fine grid
-    spf = generate_peaks_param(mypsf, num_images, num_directions, num_orders, rel_peak / (num_orders-1))
+    # Lattice SIM illumination: all directions are present in every image and
+    # the images are translations of the whole pattern (see src/lattice.jl).
+    num_directions = 3
+    rel_peak = 0.40 # peak position relative to sampling limit on the fine grid
+    k_vecs = ideal_lattice_kvecs(num_directions, rel_peak)
+    coherent = false  # true: all beams (at ±k/2) interfere -> additional mixed peaks
+    # translations along one optimized step vector (scan=:line) with the minimal
+    # number of images (2 * number of peaks - 1), or an XY raster (scan=:raster):
+    num_peaks = length(first(lattice_peaks(k_vecs; coherent=coherent)))
+    spf = generate_lattice_param(mypsf, k_vecs; coherent=coherent, scan=:line, num_images=2 * num_peaks - 1)
+    # spf = generate_lattice_param(mypsf, k_vecs; coherent=coherent, scan=:raster, raster=(5, 5))
 
     # obj[1,1] = 1.0
     # obj = CuArray(obj)
     # obj .= 1f0
     downsample_factor = 2
     num_photons = 1000.00
-    @time sim_data, sp = simulate_sim(obj, pp, spf, downsample_factor; n_photons=num_photons);
+    @time sim_data, sp = simulate_sim(obj, spf, downsample_factor; n_photons=num_photons);
     if (use_cuda)
         sim_data = CuArray(sim_data);
     end
@@ -47,7 +54,7 @@ function main()
     rp.use_measure=!use_cuda
     rp.double_use=true; rp.preshift_otfs=true; 
     rp.hgoal = hgoal_exp 
-    prep = recon_sim_prepare(sim_data, pp, sp, rp); # do preallocate
+    prep = recon_sim_prepare(sim_data, sp, rp); # do preallocate
 
     @time recon = recon_sim(sim_data, prep, sp);
     wf = resample(sum(sim_data, dims=3)[:,:,1], size(recon))

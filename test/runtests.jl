@@ -9,3 +9,4 @@ using StructuredIlluminationMicroscopy
 using NDTools
 
 include("sim2dtests.jl")
+include("upsample_conv2.jl")

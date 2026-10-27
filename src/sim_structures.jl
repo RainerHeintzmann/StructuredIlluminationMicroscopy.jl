@@ -48,7 +48,7 @@ mutable struct SIMParams
         end
         new(mypsf, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases, otf_exponent)
     end
-    function SIMParams(sp::SIMParams; mypsf=sp.mypsf, k_peak_pos=sp.k_peak_pos, peak_phases=sp.peak_phases, peak_strengths=sp.peak_strengths, otf_indices=sp.otf_indices, otf_phases=sp.otf_phases, otf_exponent=sp.otf_exponent)
+    function SIMParams(sp::SIMParams; mypsf=sp.mypsf, k_peak_pos=copy(sp.k_peak_pos), peak_phases=copy(sp.peak_phases), peak_strengths=copy(sp.peak_strengths), otf_indices=copy(sp.otf_indices), otf_phases=copy(sp.otf_phases), otf_exponent=copy(sp.otf_exponent))
         new(mypsf, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases, otf_exponent)
     end
 end
@@ -102,6 +102,7 @@ Fields:
 + `slice_by_slice::Bool` : slice by slice reconstruction
 + `do_deconvolve::Bool` : deconvolve the result instead of Wiener filtering
 + `deconv_lambda::Float64` : the lambda parameter for deconvolution, typically 1.2
++ `deconv_iterations::Int` : the number of iterations for deconvolution, default 16
 + `keep_hf::Bool` : whether to keep the high-frequency components of the OTFs (default: false)
 + `otf_radius::Float64` : the relative radius of the pupil compared to the sampling limit, used for the OTF masks. zero means that a threshold is used instead of a radius. default is 0.0
 
@@ -122,8 +123,10 @@ mutable struct ReconParams
     slice_by_slice::Bool # whether to reconstruct slice by slice
     do_deconvolve::Bool # whether to deconvolve the result instead of Wiener filtering
     deconv_lambda::Float64 # the lambda parameter for deconvolution, typically 1.2
+    background::Float64 # the background level passed to the deconvolution forward model
     keep_hf::Bool # whether to keep the high-frequency components of the OTFs (default: false)
     otf_radius::Float64 # the radius of the pupil, used for the otf masks. zero means that a threshold is used instead of a radius
+    deconv_iterations::Int # the number of iterations used for deconvolution
 
     function ReconParams(; # constructor with default values
         notch = nothing,
@@ -138,7 +141,8 @@ mutable struct ReconParams
         use_measure=false, # to work with CUDA
         double_use=true,
         preshift_otfs=true,
-        slice_by_slice=false, do_deconvolve=false, deconv_lambda=1.2, keep_hf=false)
+        slice_by_slice=false, do_deconvolve=false, deconv_lambda=1.2, keep_hf=false,
+        background = 0.0, deconv_iterations = 16)
         otf_radius = 0.0 # 0 means that a threshold is used instead of a radius
         new(notch, Float64(suppression_sigma), 
             Float64(suppression_strength), 
@@ -146,7 +150,7 @@ mutable struct ReconParams
             reference_slice,
             Float64(wiener_eps),
             Float64(hgoal_thresh),
-            do_preallocate, use_measure, double_use, preshift_otfs, hgoal, slice_by_slice, do_deconvolve, deconv_lambda, keep_hf, otf_radius)
+            do_preallocate, use_measure, double_use, preshift_otfs, hgoal, slice_by_slice, do_deconvolve, deconv_lambda, background, keep_hf, otf_radius, deconv_iterations)
     end
 end
 
@@ -195,6 +199,10 @@ mutable struct PreparationParams{RAT, CAT} # , CT, D, RT, TA <: AbstractArray{CT
     plan_fft!::AbstractFFTs.Plan
     plan_irfft::AbstractFFTs.Plan
     deconv_lambda::Float64
+    background::Float64
+    filter_otf::CAT # normalized OTF of the reconstruction (used by update_final_filter! and deconvolve_result); size 1 if unused
+    filter_hgoal::CAT # goal transfer function used for the final filter; size 1 if unused
+    deconv_iterations::Int
 
     function PreparationParams(RAT::Type)
         CAT = complex_arr_type(RAT, Val(ndims(RAT)))
@@ -203,6 +211,7 @@ mutable struct PreparationParams{RAT, CAT} # , CT, D, RT, TA <: AbstractArray{CT
         rat_dummy = RAT(undef, ntuple((d)->0, ndims(RAT)))
         plan_dummy = plan_fft!(cat_dummy)
         deconv_lambda=1.2;
+        background=0.0
 
         new{RAT, CAT}(pinv_dummy, [cat_dummy,], [(0,0,0),],
                       false, 2, # slice_by_slice, upsample_factor
@@ -210,7 +219,8 @@ mutable struct PreparationParams{RAT, CAT} # , CT, D, RT, TA <: AbstractArray{CT
                       [], # subpixel shifters
                       cat_dummy, cat_dummy, # ftorder, order
                       rat_dummy, cat_dummy, cat_dummy,# result, result_rft, result_rft_tmp
-                      plan_dummy, plan_dummy, deconv_lambda)
+                      plan_dummy, plan_dummy, deconv_lambda, background,
+                      cat_dummy, cat_dummy, 16)
     end
 end
 
@@ -247,15 +257,20 @@ function SIMPattern(h, sp::SIMParams, n, otf_num)
 end
 
 """
-    make_3d_pattern!(sp, num_directions, num_orders)
+    make_3d_pattern(k_peak_pos, offset_phase=0.0; individual_otfs=false)
 
-fills the sp.otf_indices and sp.otf_phases arrays with sensible values for a 3D pattern.
+Returns `otf_indices, otf_phases` with sensible values for a 3D pattern: peaks
+without an axial component use OTF 1, the peaks of each distinct axial
+frequency `k[3]` share one further OTF (2, 3, ...; one OTF 2 when all axially
+modulated peaks have the same `k[3]`, as in classical 3-beam SIM). `offset_phase`
+is the axial phase of the modulation (the pattern's z position relative to the
+focal plane), a number for all axially modulated peaks or a vector per peak.
 """
 function make_3d_pattern(k_peak_pos, offset_phase=0.0; individual_otfs=false)
     num_peaks = length(k_peak_pos)
-    has_kz(p) = (p[3] != 0.0) 
+    has_kz(p) = (p[3] != 0.0)
 
-    otf_indices = let 
+    otf_indices = let
         if (individual_otfs)
             collect(1:length(k_peak_pos))
         else
@@ -263,10 +278,17 @@ function make_3d_pattern(k_peak_pos, offset_phase=0.0; individual_otfs=false)
         end
     end
     if !(individual_otfs)
-        otf_indices[has_kz.(k_peak_pos)] .= 2
+        kzs = Float64[]          # distinct axial frequencies, in order of appearance
+        for (i, p) in enumerate(k_peak_pos)
+            has_kz(p) || continue
+            j = findfirst(k -> isapprox(k, p[3]; rtol=1e-9, atol=1e-12), kzs)
+            j === nothing && (push!(kzs, p[3]); j = length(kzs))
+            otf_indices[i] = 1 + j
+        end
     end
 
     otf_phases = zeros(Float64, num_peaks)
-    otf_phases[has_kz.(k_peak_pos)] .= offset_phase
+    sel = has_kz.(k_peak_pos)
+    otf_phases[sel] .= offset_phase isa AbstractVector ? offset_phase[sel] : offset_phase
     return otf_indices, otf_phases
 end

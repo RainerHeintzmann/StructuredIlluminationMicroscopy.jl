@@ -9,7 +9,14 @@ Parameters:
 + `k0::Float64`: peak frequency of first order (relative to the Nyquist frequency of the image)
 + individual_otfs: if true, each k-shift gets its own otf index assigned in the peak generation (default: false)
 """
-function generate_peaks(num_images::Int=9, num_directions::Int=3, num_orders::Int=2, k1 = 0.9, single_zero_order=true, k1z = 0.0; use_lattice=false, lattice_shift=nothing, individual_otfs=false)
+function generate_peaks(num_images::Int=9, num_directions::Int=3, phi0=0.0, num_orders::Int=2, k1 = 0.9, single_zero_order=true, k1z = 0.0; use_lattice=false, lattice_shift=nothing, individual_otfs=false)
+    if use_lattice
+        # All directions in every image (sum of gratings); the images are
+        # translations p * lattice_shift (raw pixels), optimized if not given.
+        num_orders > 2 && @warn "Lattice SIM currently supports two orders; ignoring num_orders = $num_orders."
+        shifts = isnothing(lattice_shift) ? nothing : [p .* (lattice_shift[1], lattice_shift[2]) for p in 0:num_images-1]
+        return generate_lattice_peaks(ideal_lattice_kvecs(num_directions, k1, phi0); num_images=num_images, shifts=shifts)
+    end
     num_peaks = num_directions * num_orders;
     if (single_zero_order)
         num_peaks -= num_directions - 1 
@@ -18,7 +25,7 @@ function generate_peaks(num_images::Int=9, num_directions::Int=3, num_orders::In
     current_peak = 1
     for d in 0:num_directions-1 # starts at zero
         for o in 0:num_orders-1 # starts at zero
-            phi = 2pi*d/num_directions
+            phi = pi*d/num_directions + phi0;
             k = k1 .* o
             if (o > 0 || d==0 || single_zero_order == false)
                 if (k == 0.0) # this is a zero order peak
@@ -35,9 +42,6 @@ function generate_peaks(num_images::Int=9, num_directions::Int=3, num_orders::In
         end
     end
 
-    if isnothing(lattice_shift) && use_lattice
-        # calculate ideal lattic shift here
-    end
     peak_phases = zeros(num_images, num_peaks)
     peak_strengths = zeros(num_images, num_peaks)
     phases_per_cycle = num_images ÷ num_directions
@@ -49,12 +53,7 @@ function generate_peaks(num_images::Int=9, num_directions::Int=3, num_orders::In
             for o in 0:num_orders-1
                 if (o > 0 || d==0 || single_zero_order == false)
                     if (o == 0 || d == current_d)
-                        if (use_lattice)
-                            my_k_vec = k_peak_pos[current_peak]
-                            peak_phases[p+1, current_peak] = exp(1îm * dot(lattice_shift, my_k_vec))
-                        else
-                            peak_phases[p+1, current_peak] = mod(2pi*o*p/phases_per_cycle, 2pi)
-                        end
+                        peak_phases[p+1, current_peak] = mod(2pi*o*p/phases_per_cycle, 2pi)
                         peak_strengths[p+1, current_peak] = 1.0
                     end
                     current_peak += 1
@@ -63,9 +62,6 @@ function generate_peaks(num_images::Int=9, num_directions::Int=3, num_orders::In
         end
     end
 
-    if use_lattice
-        peak_strength[:,1] = num_directions
-    end    
     otf_indices, otf_phases = make_3d_pattern(k_peak_pos, 0.0; individual_otfs=individual_otfs); # no offset_phase
 
     return k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases
@@ -89,25 +85,45 @@ end
 """
     get_kz(pp, sampling, k1)
 
-estimate the kz positions of the peaks, by assuming that they reside on the perfect excitation OTF outer border
+Axial frequency (relative to the axial Nyquist frequency) of a first-order peak
+of three-beam SIM: the interference of the central (zero-order) beam on the
+optical axis with a side beam whose lateral frequency is `k1`. Both beams lie
+on the Ewald sphere of radius n/λ, so the side beam is tilted by θ with
+sin θ = k1 / k0 and the axial difference is k0_z (1 - cos θ).
 
-Note that the x-sampling is assumed to be the same as the y-sampling
+Note that the x-sampling is assumed to be the same as the y-sampling.
 Parameters:
-+ `pp::PSFParams` : PSFParams object
-+ `sampling::NTuple` : pixel pitch samplings
-+ k1: lateral frequency of the first order peak relativ to Nyquist (assumed to be integerence of zero with first amplitude order) 
++ `pp::PSFParams` : PSFParams object; its `λ` should be the excitation wavelength and `n` the refractive index
++ `sampling::NTuple` : pixel pitch samplings (x, y, z)
++ `k1` : lateral frequency of the first-order peak relative to the lateral Nyquist frequency
+         (the interference of the zero order with one first amplitude order)
 
 """
 function get_kz(pp, sampling::NTuple, k1)
-    k0 = 2 .* sampling ./ (pp.λ / pp.n) # radius of the Ewald sphere in the x, y, z directions relative to Nqyuist  
-    sin_alpha = pp.NA / pp.n #  k1 / k0[1]
-    sin_alpha_prime = sin_alpha - k1 / k0[1]
-    if (sin_alpha_prime > 1.0)
+    k0 = 2 .* sampling ./ (pp.λ / pp.n) # radius of the Ewald sphere in the x, y, z directions relative to Nyquist
+    sin_theta = k1 / k0[1]
+    if (sin_theta > 1.0)
         error("The peak frequency is too high for the given sampling, wavelength and refractive index. Reduce the peak frequency or increase the sampling.")
     end
-    kz = (cos(asin(sin_alpha_prime)) - cos(asin(sin_alpha))) * k0[3]
-    # kz = (1.0 - sqrt(1 - sin_alpha^2)) / k0[3]
-    return kz
+    return (1.0 - sqrt(1.0 - sin_theta^2)) * k0[3]
+end
+
+"""
+    randomize_phases(spf::SIMParams, ΔΦ = 0.1)
+
+applies a random phase shift uniformly distributed between -ΔΦ and ΔΦ to the phase data
+in a copy of spf which is returned.
+"""
+function randomize_phases(spf::SIMParams, ΔΦ = 0.1)
+    modified_spf = SIMParams(spf)
+    for order in 2:size(spf.peak_strengths,2)
+        for img_num in 1:size(spf.peak_strengths,1)
+            if (spf.peak_strengths[img_num, order] != 0)
+                modified_spf.peak_phases[img_num, order] += (2*rand()-1)*ΔΦ
+            end
+        end
+    end
+    return modified_spf
 end
 
 
@@ -154,7 +170,16 @@ function simulate_sim(obj, sp::SIMParams, downsample_factor::Int = 1; n_photons 
             sim_pattern = SIMPattern(h, sp, n, otf_num)
             myidx = ntuple(d->(d==ndims(sim_data)) ? n : Colon(), ndims(sim_data))
             # sim_data[myidx...] .= conv_psf(obj .* sim_pattern, h)
-            myrfft = rfft(emission_modification.(obj .* sim_pattern))
+            normal_emission = obj .* sim_pattern
+            modified_emission = emission_modification.(normal_emission)
+            if (n == 1 && emission_modification != identity)
+                ratio = maximum(normal_emission) / maximum(modified_emission)
+                if (ratio < 1.2 && ratio > 0.8)
+                    @warn "emission modification was only $(ratio)"
+                end
+                println("emission modification was $(ratio)")
+            end
+            myrfft = rfft(modified_emission)
             # if (downsample_factor != 1.0)
             #     myrfft = rfft_crop(myrfft, dsz) # leads to downsampling
             # end
@@ -228,7 +253,7 @@ function simulate_sim_3d(obj, spf, mypsf; n_photons = 1000, n_photons_bg=1.2f0, 
     tmp_k_est = spf.k_peak_pos
     df = (downsample_factor, downsample_factor, 1)
     spf.k_peak_pos = [k_peak_pos./df  for k_peak_pos in (spf.k_peak_pos)]    
-    measured, sp = simulate_sim(obj, spf, downsample_factor; n_photons = n_photons, n_photons_bg = n_photons_bg, emission_modification=identity);
+    measured, sp = simulate_sim(obj, spf, downsample_factor; n_photons = n_photons, n_photons_bg = n_photons_bg, emission_modification=emission_modification);
     spf.k_peak_pos = tmp_k_est
     spf.mypsf = tmppsf # restore the PSF in the SIMParams
 

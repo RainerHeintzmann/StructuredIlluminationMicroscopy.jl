@@ -71,7 +71,7 @@ module StructuredIlluminationMicroscopy
     using LinearAlgebra # for dot
     using NDTools  # select_region!
     using Noise # for poisson simulation
-    using Images # for distance transform
+    using ImageMorphology: feature_transform, distance_transform # for the hgoal footprint (the Images umbrella is too heavy for app builds)
     using SeparableFunctions
     using Statistics # for mean
     using FindShift # for subpixel correlation
@@ -83,11 +83,12 @@ module StructuredIlluminationMicroscopy
 
     export PSFParams, SIMParams, ReconParams, PreparationParams
     export generate_peaks, generate_peaks_param, recon_sim_prepare, recon_sim, make_3d_pattern, get_otfs, get_kz
+    export recon_sim_orders, recon_sim_finalize, update_final_filter!, deconvolve_result, hgoal_filter
     export separate_and_place_orders, modify_otf, SIMPattern, get_upsampled_rft, get_result_size, ifftshift_sep!, fftshift_sep!
     export get_shift_subpixel, pinv_weight_matrix, shift_subpixel!, shift_subpixel, shift_subpixel_fft, dot_mul_last_dim!, add!, conj_add!
     export rfft_crop, rfft_size, rfftshift, rifftshift, rfftshift!, rifftshift!, get_rft_center
     export swap_vals!, fftshift!, IntType, force_integer_pixels, estimate_prep_mem, print_mem_usage
-    export estimate_parameters, apply_photon_noise
+    export estimate_parameters, estimate_axial, apply_photon_noise
     export preprocess_sim
     export psf_notch, gaussian_notch, remove_oof_light
     export simulate_sim, simulate_sim_3d, get_non_linear_saturation
@@ -95,16 +96,23 @@ module StructuredIlluminationMicroscopy
     export notch_filter
     export create_grating_param_file, create_para_list, optimize_grating_sum, find_optimum_set
     export PARA_SET, create_grating, find_grating, check_phase_steps
+    export upsample_bc!, upsample_conv_lanczos!, upsampled_size, run_conv_upsample, run_conv_upsample!, conv_upsample_tullio
+    export just_separate, randomize_phases
+    export ideal_lattice_kvecs, lattice_peaks, lattice_shifts, generate_lattice_peaks, generate_lattice_param
+    export precompute_correlations, get_correlation_map
 
     include("h_goal.jl")    
     include("preprocess.jl")    
     include("sim_structures.jl")
     include("utils.jl")
     include("simulate_sim.jl")
+    include("lattice.jl")
     include("classical_sim.jl")
     include("parameter_estimation.jl")
+    include("axial_estimation.jl")
     include("notch_filters.jl")
     include("find_grating.jl")
     include("create_grating.jl")
+    include("upsample.jl")
 
 end

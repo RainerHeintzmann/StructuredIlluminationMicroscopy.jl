@@ -9,7 +9,7 @@ Parameters:
 """
 function weight_matrix(sp::SIMParams)
     wm = cis.(sp.peak_phases) .* sp.peak_strengths
-    tint = abs(sum(wm[:,1]))
+    tint = abs(sum(wm[:,1])) # just a single scalar factor
     # normalize the forward model to preserve the total intensity of the source
     return wm ./ tint
 end
@@ -18,6 +18,8 @@ end
     pinv_weight_matrix(sp; Eps=1e-6)
 
 return the pseudo-inverse of the weight matrix from the peak_phases and peak_strengths in the SIMParams object.
+Note that this requires to first extend the weight matrix by its conjugate terms (for non-zero orders),
+calculate the Moor-Penrose pseudo-inverse and then remove the doublicate half.
 
 Parameters:
 + `sp::SIMParams` : SIMParams object, containing SIMParams.peak_phases and SIMParams.peak_strengths
@@ -25,7 +27,12 @@ Parameters:
 
 """
 function pinv_weight_matrix(sp; Eps=1e-6)
-    res = pinv(weight_matrix(sp))
+    # for the pseudo inverse we need to first concatinate the conjugate parts and then remove the doublicates again.
+    # I guess there may be a mathematically faster way to achieve the same, but just working with the 
+    # reduced matrix does NOT work ...
+    mymat = weight_matrix(sp)
+    mymatb = cat(mymat, conj.(mymat[:,2:end]), dims=2)
+    res = pinv(mymatb)[1:size(mymat,2),:]
     res[abs.(res) .< Eps] .= 0.0
 
     res = correct_pinv_weight_matrix(res)
@@ -175,7 +182,8 @@ end
 """
     get_shift_subpixel(img, ordershift)
 
-returns a separable function representation of a pixel-shifter to be multiplied with the FFT
+returns a separable function representation of a pixel-shifter to be multiplied with the FFT.
+    Note that it ignores the z-component of the ordershift, which is already accounted for in the OTF.
 """
 function get_shift_subpixel(img, ordershift)
     pixelshift = round.(Int, ordershift)

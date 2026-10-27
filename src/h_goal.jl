@@ -51,6 +51,7 @@ end
 """
     hgoal_leaver_2D(rrel)
 This is a 2D version from the Leaver & Smith 1975 paper.
+Leaver and Smith, 1975, “Radially symmetric pupil function having properties of producing a point spread function which decreases monotonically with the increase of radius”, Opt. Commun, 15, 374. 
 Yealds a monotonically decaying function in its Fourier transformation.
 """
 function hgoal_leaver_2D(rrel)

@@ -1,4 +1,3 @@
-
 """
     function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
                             subtract_mean=true, upsample=false, suppress_sigma=0.0, 
@@ -27,18 +26,29 @@ The function returns the estimated parameters for the SIM image.
 - `show_quality`: If true, the function will print the conditioning quality of the unmixing matrix. Default is true.
 - `verbose`: If true, the function will print information about the estimation process. Default is true.
 - `phase_only`: If true, the function will only consider the phase information in Fourierspace for the autocorrelation. Default is `false`.
+- `peak_ref`: should be `nothing`, except if this was already precomputed using the function `precompute_correlations`.
+- `corr_psf`: should be `nothing`, except if this was already precomputed using the function `precompute_correlations`.
+- `cropped`: should be `nothing`, except if this was already precomputed using the function `precompute_correlations`.
+- `method`, `scale`, `roi_size`: peak localization method of FindShift's `get_subpixel_correl` (`:FindIter` default,
+    `:FindZoomFT`, `:FindParabola`, `:FindCOM`, `:FindWaveFit`) and the zoom settings of `:FindZoomFT`.
+- `normalize_overlap`: if true, the correlation is divided by its spectral-overlap envelope before the peak is
+    located (see FindShift's `get_subpixel_correl`). Removes the bias of the peak towards zero frequency,
+    e.g. for peaks beyond the OTF cutoff (TIRF). Default is `false`.
+- `refine`: if false, the (subpixel) peak positions `k_vecs` are used as given and only the phases and strengths
+    are estimated, e.g. for peaks whose positions follow from other, better measurable peaks. Default is `true`.
 
 # Returns
 - `sp`: The estimated parameters for the SIM image. This is a `SIMParams` object containing the estimated parameters.
 
 
 """
-function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
+function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing, peak_ref=nothing, corr_psf=nothing, cropped=nothing,
                             subtract_mean=true, upsample=false, suppress_sigma=0.15, 
                             num_directions=0, ideal_strength=true, implied_higher_orders=0,
                             otf_exponent = 1.0, otf_moebius = 1.0, amp_magnitudes=nothing, individual_otfs=false,
-                            show_quality=true, notch_filter=nothing, verbose=true, phase_only=false)
-    if num_directions > 0
+                            show_quality=true, notch_filter=nothing, verbose=true, phase_only=false, method=:FindIter, scale = 200, roi_size = 2,
+                            normalize_overlap=false, refine=true)
+    if (num_directions > 0)
         num_phases = size(dat, ndims(dat)) ÷ num_directions;
         if num_phases * num_directions != size(dat, ndims(dat))
             error("The number of phases times the number of directions must equal the number of frames.")
@@ -58,7 +68,8 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
                                             subtract_mean=subtract_mean, suppress_sigma=suppress_sigma, 
                                             num_directions=0, ideal_strength=ideal_strength, implied_higher_orders=implied_higher_orders,
                                             amp_magnitudes=amp_magnitudes, otf_exponent=otf_exponent, otf_moebius = otf_moebius, individual_otfs=individual_otfs,
-                                            show_quality=show_quality, notch_filter=notch_filter, verbose=verbose, phase_only=phase_only)
+                                            show_quality=show_quality, notch_filter=notch_filter, verbose=verbose, phase_only=phase_only, method=method, scale=scale, roi_size=roi_size,
+                                            normalize_overlap=normalize_overlap, refine=refine)
             if (d == 1)
                 spf = spf_sub
             else
@@ -101,91 +112,23 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
         end
         return spf
     end
-    # psf = abs2.(ift(rr(size(dat)[1:2]) .< 0.25*size(dat,1)))
-    # psf ./= sum(psf)
-    cs = size(dat)[1:2]
-    # preprocess the data according to the settings
+
     mymean = mean(dat, dims=ndims(dat)) 
-    cropped = let
-        if (subtract_mean)
-            if isnothing(refdat)
-                refdat = mymean 
-            end
-            Float32.(dat) .- Float32.(mymean) .* sum(dat, dims=(1:ndims(dat)-1)) ./ sum(mymean)
-        else
-            if isnothing(refdat)
-                refdat = mymean
-            end
-            Float32.(dat)
-        end
+    if isnothing(refdat)
+        refdat = mymean 
     end
-
-    # select the PSF to use for prefiltering
-    # if isnothing(mypsf)
-    #     mypsf = collect(delta(eltype(dat), size(dat)[1:end-1]))
-    # end
-
-    corr_psf = mypsf
-    if !isnothing(mypsf)
-        corr_psf = mypsf ./ sum(mypsf) # let
-        corr_otf = fft(corr_psf)
-        was_modified = false
-        if (otf_moebius != 1 || otf_exponent != 1)
-            # gamma = 0.5;x=0:0.01:1; plot(moebius.(x, 1/gamma), label="moebius γ=$(gamma)"); plot!(x.^gamma, label="exp γ=$(gamma)")
-            # gamma = 2;x=0:0.01:1; plot!(moebius.(x, 1/gamma), label="moebius γ=$(gamma)"); plot!(x.^gamma, label="exp γ=$(gamma)")
-            # gamma = 1;x=0:0.01:1; plot!(moebius.(x, 1/gamma), label="moebius γ=$(gamma)")
-            # xlabel!("input"); ylabel!("output"); title!("Moebius vs. Expontial Gamma Correction")
-            if (otf_moebius != 1)
-                old_mag = abs.(corr_otf);
-                gamma = 1/otf_moebius;  # to make it behave like the exponential gamma
-                moebius(old_mag, gamma) = gamma*old_mag/(1+(gamma-1)*old_mag)
-                corr_otf .= cis.(angle.(corr_otf)) .* moebius.(old_mag, gamma)
-            end
-            if (otf_exponent != 1)
-                new_mag = abs.(corr_otf) .^ otf_exponent
-                corr_otf .= cis.(angle.(corr_otf)) .* new_mag
-            end
-            mypsf = real.(ifft(corr_otf))
-            mypsf = mypsf ./ sum(mypsf) # let
-            was_modified = true
-        end
-        # modify the PSF to suppress the low frequencies, if wanted
-        if ndims(corr_otf) > 2
-            corr_otf = @view corr_otf[:,:,1]
-            midz = size(corr_psf,3) ÷ 2 + 1
-            corr_psf = @view corr_psf[:,:,midz]
-        end
-        shift_x = (angle(-corr_otf[2,1])) .* size(corr_otf,1) / 2pi
-        shift_y = (angle(-corr_otf[1,2])) .* size(corr_otf,2) / 2pi
-
-        if (abs(shift_x) > 0.05 || abs(shift_y) > 0.05)
-            @warn "The PSF is significantly asymmtric or shifted by $(shift_x), $(shift_y).\nThis may lead to problems in the estimation. Trying to correct shift"
-            shifter = ifftshift(exp_ikx_col(typeof(corr_otf), size(corr_otf), shift_by=(shift_x, shift_y)))
-            corr_otf .*= shifter
-            was_modified = true
-        end
-        if (suppress_sigma > 0)
-            # construct a 1-gaussian to suppress the low frequencies of the PSF
-            gs = ifftshift(1 .- gaussian_sep(real_arr_type(typeof(corr_psf)), size(corr_psf); sigma=suppress_sigma .* size(corr_psf)))
-            corr_otf .*= gs
-            was_modified = true
-        end
-        if (was_modified)
-            corr_psf = ifft(corr_otf)
-        end
-    end
-
-    # use the first provided image as the one to correlate with the reference.
-    # The prefiltering is done in get_subpixel_correl.
     refdat = squeeze_dim(refdat, ndims(refdat))
-    peak_ref = squeeze_dim(slice(cropped, ndims(cropped), 1), ndims(cropped)) # [:,:,1]
+
+    peak_ref, corr_psf, cropped = isnothing(peak_ref) ? precompute_correlations(dat, mypsf; otf_moebius=otf_moebius, otf_exponent=otf_exponent, suppress_sigma=suppress_sigma, subtract_mean=subtract_mean, datmean=mymean) : (peak_ref, corr_psf)
 
     if isnothing(k_vecs)
         # let the user interactively select the initial k vectors:
-        k_vecs, _, _ = get_subpixel_correl(peak_ref; other=refdat, psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=true, show_quality=show_quality, phase_only=phase_only)
+        k_vecs, _, _ = get_subpixel_correl(peak_ref; other=refdat, psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=true, show_quality=show_quality, phase_only=phase_only, method=method, scale=scale, roi_size=roi_size, normalize_overlap=normalize_overlap)
         println("You can call this function with the k_vecs parameter $(k_vecs) to speed up the estimation.")
+    elseif !refine
+        k_vecs = [(Float64(k[1]), Float64(k[2])) for k in k_vecs]
     else
-        k_vecs, _, _ = get_subpixel_correl(peak_ref; other=refdat, k_est = k_vecs,  psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=false, show_quality=show_quality, phase_only=phase_only)
+        k_vecs, _, _ = get_subpixel_correl(peak_ref; other=refdat, k_est = k_vecs,  psf=corr_psf, upsample=upsample, correl_mask=nothing, interactive=false, show_quality=show_quality, phase_only=phase_only, method=method, scale=scale, roi_size=roi_size, normalize_overlap=normalize_overlap)
     end
 
     # find_shift(dat[:,:,1], dat[:,:,1])
@@ -250,6 +193,116 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
     return spf
 end
 
+function precompute_correlations(dat, mypsf=nothing; subtract_mean=true, datmean=mean(dat, dims=ndims(dat)), otf_moebius=1f0, otf_exponent=1f0, suppress_sigma=0.15)
+    # psf = abs2.(ift(rr(size(dat)[1:2]) .< 0.25*size(dat,1)))
+    # psf ./= sum(psf)
+    cs = size(dat)[1:2]
+    # preprocess the data according to the settings
+
+    cropped = let
+        if (subtract_mean)
+            # subtract the appropriately scaled mean from each slice.
+            Float32.(dat) .- Float32.(datmean) .* sum(dat, dims=(1:ndims(dat)-1)) ./ sum(datmean)
+        else
+            Float32.(dat)
+        end
+    end
+
+    # select the PSF to use for prefiltering
+    # if isnothing(mypsf)
+    #     mypsf = collect(delta(eltype(dat), size(dat)[1:end-1]))
+    # end
+
+    corr_psf = mypsf
+    if !isnothing(mypsf)
+        corr_psf = mypsf ./ sum(mypsf) # let
+        corr_otf = fft(corr_psf)
+        was_modified = false
+        if (otf_moebius != 1 || otf_exponent != 1)
+            # gamma = 0.5;x=0:0.01:1; plot(moebius.(x, 1/gamma), label="moebius γ=$(gamma)"); plot!(x.^gamma, label="exp γ=$(gamma)")
+            # gamma = 2;x=0:0.01:1; plot!(moebius.(x, 1/gamma), label="moebius γ=$(gamma)"); plot!(x.^gamma, label="exp γ=$(gamma)")
+            # gamma = 1;x=0:0.01:1; plot!(moebius.(x, 1/gamma), label="moebius γ=$(gamma)")
+            # xlabel!("input"); ylabel!("output"); title!("Moebius vs. Expontial Gamma Correction")
+            if (otf_moebius != 1)
+                old_mag = abs.(corr_otf);
+                gamma = 1/otf_moebius;  # to make it behave like the exponential gamma
+                moebius(old_mag, gamma) = gamma*old_mag/(1+(gamma-1)*old_mag)
+                corr_otf .= cis.(angle.(corr_otf)) .* moebius.(old_mag, gamma)
+            end
+            if (otf_exponent != 1)
+                new_mag = abs.(corr_otf) .^ otf_exponent
+                corr_otf .= cis.(angle.(corr_otf)) .* new_mag
+            end
+            mypsf = real.(ifft(corr_otf))
+            mypsf = mypsf ./ sum(mypsf) # let
+            was_modified = true
+        end
+        # modify the PSF to suppress the low frequencies, if wanted
+        if ndims(corr_otf) > 2
+            corr_otf = @view corr_otf[:,:,1]
+            midz = size(corr_psf,3) ÷ 2 + 1
+            corr_psf = @view corr_psf[:,:,midz]
+        end
+        shift_x = (angle(-corr_otf[2,1])) .* size(corr_otf,1) / 2pi
+        shift_y = (angle(-corr_otf[1,2])) .* size(corr_otf,2) / 2pi
+
+        if (abs(shift_x) > 0.05 || abs(shift_y) > 0.05)
+            @warn "The PSF is significantly asymmtric or shifted by $(shift_x), $(shift_y).\nThis may lead to problems in the estimation. Trying to correct shift"
+            shifter = ifftshift(exp_ikx_col(typeof(corr_otf), size(corr_otf), shift_by=(shift_x, shift_y)))
+            corr_otf .*= shifter
+            was_modified = true
+        end
+        if (suppress_sigma > 0)
+            # construct a 1-gaussian to suppress the low frequencies of the PSF
+            gs = ifftshift(1 .- gaussian_sep(real_arr_type(typeof(corr_psf)), size(corr_psf); sigma=suppress_sigma .* size(corr_psf)))
+            corr_otf .*= gs
+            was_modified = true
+        end
+        if (was_modified)
+            corr_psf = ifft(corr_otf)
+        end
+    end
+
+    # use the first provided image as the one to correlate with the reference.
+    # The prefiltering is done in get_subpixel_correl.
+    peak_ref = squeeze_dim(slice(cropped, ndims(cropped), 1), ndims(cropped)) # [:,:,1]
+
+    return peak_ref, corr_psf, cropped
+end
+
+"""
+    get_correlation_map(dat, mypsf=nothing; subtract_mean=true, datmean=mean(dat, dims=ndims(dat)), upsample=false)
+
+computes a correlation map that can be used for interactive and automatic peak identification.
+# Arguments
+- `dat`: The data to correlate
+- `psf`: an (optional) psf to determing the weights during correlation. If `nothing` is provided a psf will be assumed.
+- `other`: a possibly second dataset to correlate to
+- `upsample`: determines whether upsampling (Fourier-padding) is used to calculate the correlation. Upsampling is a little more accurate but slower.
+- `subtract_mean`: If true, the mean value will be subtracted
+
+"""
+function get_correlation_map(dat, mypsf=nothing, refdat=nothing; subtract_mean=true, datmean=mean(dat, dims=ndims(dat)), upsample=false, otf_moebius=1f0, otf_exponent=1f0, suppress_sigma=0.15)
+    mymean = datmean;  
+    if isnothing(refdat)
+        refdat = mymean 
+    end
+    refdat = squeeze_dim(refdat, ndims(refdat))
+
+    peak_ref, corr_psf, _ = precompute_correlations(dat, mypsf; subtract_mean=subtract_mean, datmean=mymean, otf_moebius=otf_moebius, otf_exponent=otf_exponent, suppress_sigma=suppress_sigma) 
+
+    dat = peak_ref;
+    if isnothing(refdat)
+        refdat = dat
+    end
+    up = FindShift.prepare_correlation(dat, corr_psf; upsample=upsample)
+    up_other = FindShift.prepare_correlation(refdat, corr_psf; upsample=upsample)
+
+    ftcorrel = up .* conj.(up_other)
+
+    return ftcorrel, peak_ref, corr_psf
+end
+
 """
     order_strengths_from_amp(amp_magnitudes)
 
@@ -292,3 +345,52 @@ function kvecs_to_peak(k_vecs, sz)
     return to_peak.(k_vecs)
 end
 
+"""
+    correlate_raw_data(sim_data, sp::SIMParams)
+
+this function correlates all raw data images and various k-positions according to 
+K. Wicker, O. Mandula, G. Best, R. Fiolka, R. Heintzmann, Phase optimisation for structured illumination microscopy, Optics Express 21, 2032–2049, 2013
+https://opg.optica.org/oe/fulltext.cfm?uri=oe-21-2-2032
+See section 4.3 onwards to calculate the image correlation tensor D_ij^(l) with i, j being the images and l being the shift-k-vector
+and from there the optimization can be performed via
+C = M^(-1) D^(l) M^(-1)*
+
+with the aim to optimize the phases (and order-strength) to minimize artefacts.
+"""
+function correlate_raw_data(sim_data, sp::SIMParams)
+    num_ks = length(sp.k_peak_pos)
+    num_imgs = size(sim_data)[end]
+    D_ijl = zeros(ComplexF64, num_imgs, num_imgs, num_ks)
+    for (l, myk) in enumerate(sp.k_peak_pos)
+        k_exponential = exp_ikx_sep(complex_arr_type(typeof(sim_data)), size(sim_data)[1:end-1]; shift_by=myk)
+        for (i, sim_slice1) in enumerate(eachslice(sim_data; dims=ndims(sim_data)))
+            for (j, sim_slice2) in enumerate(eachslice(sim_data; dims=ndims(sim_data)))
+                D_ijl[i,j,l] = sum(sim_slice1 .* k_exponential .* conj.(sim_slice2))
+                D_ijl[j,i,l] = conj.(D_ijl[j,i,l])
+            end
+        end
+    end
+    return D_ijl
+end
+
+"""
+    Cijl_from_Dijl(M, Dijl)
+
+converts the Dijl matrix containing the correlations between images into a 
+Cijl matrix, containing the correlations between orders (i.e. k-vector positions).
+
+```jdoctest
+Example:
+Dijl = StructuredIlluminationMicroscopy.correlate_raw_data(sim_data, sp)
+M = StructuredIlluminationMicroscopy.weight_matrix(sp)
+StructuredIlluminationMicroscopy.Cijl_from_Dijl(M, Dijl)
+```
+"""
+function Cijl_from_Dijl(M, D_ijl)
+    M_inv = pinv(cat(M, conj.(M[:,2:end]), dims=2))
+    C_ijl = zeros(size(D_ijl))
+    for l = 1:size(D_ijl,3)
+        C_ijl[:,:,l] = M_inv*D_ijl[:,:,l]*conj.(M_inv)
+    end
+    return C_ijl
+end

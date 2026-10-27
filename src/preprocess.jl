@@ -62,14 +62,40 @@ function remove_oof_light(dat; psf3d, if_slices=7, myeps = 0.001)
 end
 
 """
-    preprocess_sim(dat; bg = 100f0, num_directions=nothing)
+    lowpass_xy(a, sigma)
 
-Preprocesses the data for SIM analysis by subtracting a background value and normalizing the data.
+Gaussian low-pass filter of `a` along its first two (lateral) dimensions with a standard
+deviation of `sigma` pixels (periodic boundaries, via the FFT); `a` for `sigma <= 0`.
 """
-function preprocess_sim(dat; bg = 100f0, num_directions=nothing, reg_const=2f0, correct_drift=true, enforce_mean=true, verbose=false, damp_edge=true)
+function lowpass_xy(a::AbstractArray{T}, sigma) where {T<:Real}
+    sigma > 0 || return a
+    sx, sy = size(a, 1), size(a, 2)
+    fx = reshape(FFTW.rfftfreq(sx), :, 1)
+    fy = reshape(FFTW.fftfreq(sy), 1, :)
+    g = T.(exp.(-2 * pi^2 * sigma^2 .* (fx .^ 2 .+ fy .^ 2)))
+    return T.(FFTW.irfft(FFTW.rfft(a, (1, 2)) .* g, sx, (1, 2)))
+end
+
+"""
+    preprocess_sim(dat; bg = 100f0, num_directions=nothing, reg_const=2f0, correct_drift=true, enforce_mean=true,
+                   verbose=false, damp_edge=true, zero_clip=false, mean_lowpass=0)
+
+Preprocesses the data for SIM analysis by subtracting a background value and normalizing the data:
+the brightness of every image is normalized to the mean, `damp_edge` damps the image edges,
+`correct_drift` registers the directions to each other, `enforce_mean` makes the mean over the
+phases of every direction equal to the overall mean (with `mean_lowpass > 0` both means are first
+low-pass filtered laterally with a Gaussian of that sigma in pixels, so each direction is corrected by
+its smooth illumination profile instead of a noisy per-pixel ratio), and `zero_clip` finally clips negative values
+(e.g. from the background subtraction, the drift interpolation or the mean enforcement) to zero.
+"""
+function preprocess_sim(dat; bg = 100f0, num_directions=nothing, reg_const=2f0, correct_drift=true, enforce_mean=true, verbose=false, damp_edge=true,
+                        zero_clip=false, mean_lowpass=0, correct_indiv_brightness=true)
     dat = dat .- bg # copies
     # correct slice brightness fluctuations
-    dat .*= mean(dat) ./ mean(dat, dims=(1:ndims(dat)-1))
+    maxdim = min(3, ndims(dat)-1)   # per image over x, y (and z), not over further axes
+    if (correct_indiv_brightness)
+        dat .*= mean(dat) ./ mean(dat, dims=(1:maxdim))
+    end
 
     if (damp_edge)
         # dat .*= window_hanning(size(dat)[1:ndims(dat)-1], border_in=0.97)
@@ -85,15 +111,16 @@ function preprocess_sim(dat; bg = 100f0, num_directions=nothing, reg_const=2f0, 
         if (correct_drift)
             dat = do_correct_drift(dat, num_directions; verbose=verbose)
         end
-        if (enforce_mean)
-            all_mean =  mean(dat, dims=ndims(dat))
+        if (enforce_mean) # enforces all directions to have the same widefield mean projection
+            all_mean = lowpass_xy(mean(dat, dims=ndims(dat)), mean_lowpass)
             num_phases = size(dat, ndims(dat)) ÷ num_directions
             for d in 1:num_directions
                 sub_data = slice(dat, ndims(dat), (d-1)*num_phases+1:d*num_phases)
-                sub_mean = mean(sub_data, dims=ndims(sub_data))
+                sub_mean = lowpass_xy(mean(sub_data, dims=ndims(sub_data)), mean_lowpass)
                 sub_data .*= all_mean .* sub_mean ./ (abs2.(sub_mean) .+ abs2(reg_const))
             end
         end
     end
+    zero_clip && (dat .= max.(dat, zero(eltype(dat))))
     return dat
 end

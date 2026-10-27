@@ -15,7 +15,7 @@ function main()
     pp = PSFParams(lambda, NA, n);  # 532 nm, NA 0.25 in Water n= 1.33
     sampling = (0.05, 0.05, 0.08)  # sampling in the orginal (high-res.) simulation grid. Should be at least twice as good as needed along XY.
     obj_sz = (512, 512, 128)
-    obj = filaments3D(Float32, obj_sz);
+    obj = filaments(Float32, obj_sz);
     mypsf = psf(obj_sz, pp; sampling=sampling)
     downsample_factor = 2 # is only applied in XY, not in Z
     # detection_sz = (obj_sz[1] ÷ downsample_factor, obj_sz[2] ÷ downsample_factor, obj_sz[3]) # size of the detection grid
@@ -25,9 +25,9 @@ function main()
 
     # SIM illumination pattern
     num_directions = 3; num_orders = 3; num_images =  (1 + 2*(num_orders-1))*num_directions; 
-    rel_peak = 0.1879 # peak position relative to sampling limit on fine grid
-    k1z = get_kz(pp, sampling, rel_peak)
-    spf = generate_peaks_params(mypsf, num_images, num_directions, num_orders, rel_peak / (num_orders-1), true, k1z)
+    rel_peak = 2 * 0.1879 # highest (second) order position relative to the sampling limit on the fine grid (= side-beam separation)
+    k1z = get_kz(pp, sampling, rel_peak / (num_orders-1)) # axial frequency of the first orders (central beam with one side beam)
+    spf = generate_peaks_param(mypsf, num_images, num_directions, 0.0, num_orders, rel_peak / (num_orders-1), true, k1z)
 
     num_photons = 100.0
     @time sim_data, sp = simulate_sim(obj, spf, downsample_factor; n_photons=num_photons);
@@ -46,7 +46,7 @@ function main()
     rp.suppression_sigma = 0.05 # 0.008 # 0.05 # 0.008
     rp.do_preallocate = true; rp.use_measure = !use_cuda
     rp.double_use = true; 
-    rp.preshift_otfs= false; # true; 
+    rp.preshift_otfs= true; # false; # true;  # CRASHES if false
     rp.hgoal = hgoal_exp 
 
     rp.do_deconvolve = false
@@ -57,9 +57,12 @@ function main()
 
     # plot(mynotch[:,1,1], title="notch filter")
 
-    prep_seq = recon_sim_prepare(sim_data, sp, rp); # do preallocate
+    use_final_filter = true
+    @time prep_seq = recon_sim_prepare(sim_data, sp, rp; use_final_filter=use_final_filter); # do preallocate
+    @btime prep_seq = recon_sim_prepare($sim_data, $sp, $rp); # do preallocate
     # do the slice-by-slice reconstruction
-    @time recon_seq = recon_sim(sim_data, prep_seq, sp); # 0.8 sec (256x256x128) 
+    @time recon_seq = recon_sim(sim_data, prep_seq, sp); # 1.2 sec (256x256x128) 
+    @btime recon_seq = recon_sim($sim_data, $prep_seq, $sp); # 1.2 sec (256x256x128) 
 
     wf = resample(sum(sim_data, dims=ndims(sim_data))[:,:,:,1], size(recon_seq));
     # @vt obj wf recon_seq 
@@ -75,13 +78,13 @@ function main()
     rp.do_deconvolve = false
     prep_seq = prep = recon = nothing; GC.gc(); # to clear the memory    
 
-    @time prep = recon_sim_prepare(sim_data, sp, rp); # 23 sec
+    @time prep = recon_sim_prepare(sim_data, sp, rp; use_final_filter=use_final_filter); # 23 sec 
     @time recon = recon_sim(sim_data, prep, sp); # 1.3 sec (256x256x128 raw), 5.2 sec
     wf = resample(sum(sim_data, dims=ndims(sim_data))[:,:,:,1], size(recon));
     # @vt recon
 
     rp.do_deconvolve = true
-    @time prepd = recon_sim_prepare(sim_data, sp, rp); # 23 sec
+    @time prepd = recon_sim_prepare(sim_data, sp, rp; ); # 23 sec
     @time recond = recon_sim(sim_data, prepd, sp); # 1.3 sec (256x256x128 raw), 5.2 sec
 
     rp.slice_by_slice = true
