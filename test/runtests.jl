@@ -8,5 +8,6 @@ using Test
 using StructuredIlluminationMicroscopy
 using NDTools
 
+include("directions_test.jl")
 include("sim2dtests.jl")
 include("upsample_conv2.jl")

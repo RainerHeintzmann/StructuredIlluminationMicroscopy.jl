@@ -68,6 +68,71 @@ function generate_peaks(num_images::Int=9, num_directions::Int=3, phi0=0.0, num_
 end
 
 """
+    generate_peaks_directions(num_phases, num_orders, zero_order_blocked, phi0=0.0, k1=0.9, k1z=0.0; individual_otfs=false)
+
+Like `generate_peaks` (grating-like illuminations with one shared zero order), but every direction can have its own
+number of phases (images), its own number of orders and its own blocked-zero-order setting.
+The images are ordered direction by direction; direction `d` is rotated by `π*(d-1)/D + phi0`.
+
+Parameters:
++ `num_phases` : vector with the number of phases (images) of every direction
++ `num_orders` : vector with the number of orders of every direction (including the zero order, as in `generate_peaks`)
++ `zero_order_blocked` : vector of Bools. A direction with a blocked zero order is a two-beam pattern: the pattern moves twice as far in phase as the
+        grating (the phase progression of its orders is doubled), and it has no axial modulation (`k1z` is not used).
++ `phi0`, `k1`, `k1z` : as in `generate_peaks`
+
+For identical entries this gives the peaks of `generate_peaks` (with the phases doubled for blocked directions).
+"""
+function generate_peaks_directions(num_phases::AbstractVector{<:Integer}, num_orders::AbstractVector{<:Integer}, zero_order_blocked::AbstractVector{Bool},
+                                   phi0=0.0, k1=0.9, k1z=0.0; individual_otfs=false)
+    D = length(num_phases)
+    (length(num_orders) == D && length(zero_order_blocked) == D) || error("num_phases, num_orders and zero_order_blocked need one entry per direction.")
+    all(>=(2), num_orders) || error("every direction needs at least 2 orders (the zero order and the first order).")
+    num_images = sum(num_phases)
+    # peak 1: the shared zero order, then the orders 1 ... num_orders-1 of every direction
+    k_peak_pos = NTuple{3, Float64}[(0.0, 0.0, 0.0)]
+    peak_dir = [0]; peak_order = [0]
+    for d in 1:D
+        phi = pi * (d - 1) / D + phi0
+        for o in 1:num_orders[d]-1
+            k = k1 * o
+            # medium orders (not the highest one) have an axial component, unless the pattern is purely lateral
+            has_kz = 0 < o < num_orders[d] - 1 && !zero_order_blocked[d]
+            push!(k_peak_pos, (k * cos(phi), k * sin(phi), has_kz ? k1z : 0.0))
+            push!(peak_dir, d); push!(peak_order, o)
+        end
+    end
+    num_peaks = length(k_peak_pos)
+    peak_phases = zeros(num_images, num_peaks)
+    peak_strengths = zeros(num_images, num_peaks)
+    first_image = 0
+    for d in 1:D
+        for q in 0:num_phases[d]-1                      # phase index within the direction
+            for i in 1:num_peaks
+                (peak_dir[i] == 0 || peak_dir[i] == d) || continue
+                ph = mod(2pi * peak_order[i] * q / num_phases[d], 2pi)
+                zero_order_blocked[d] && (ph = mod(2 * ph, 2pi))
+                peak_phases[first_image + q + 1, i] = ph
+                peak_strengths[first_image + q + 1, i] = 1.0
+            end
+        end
+        first_image += num_phases[d]
+    end
+    otf_indices, otf_phases = make_3d_pattern(k_peak_pos, 0.0; individual_otfs=individual_otfs)
+    return k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases
+end
+
+"""
+    generate_peaks_directions_param(mypsf, vargs...; kwargs...)
+
+calls `generate_peaks_directions` and returns a `SIMParams` object (see `generate_peaks_param`).
+"""
+function generate_peaks_directions_param(mypsf, vargs...; kwargs...)
+    k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases = generate_peaks_directions(vargs...; kwargs...)
+    return SIMParams(mypsf, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases)
+end
+
+"""
     generate_peaks_param(mypsf, vargs...; kwargs...)
 
 calls `generate_peaks` and returns a SIMParams object with the generated peak information packaged into the SIMParams structure.

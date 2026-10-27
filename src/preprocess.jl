@@ -1,6 +1,20 @@
 using Statistics
 
 """
+    direction_ranges(n, num_directions)
+
+The ranges of the `n` frames along the trailing axis that belong to each direction (directions are stored one after the other).
+`num_directions` is either the number of directions (equal blocks of `n ÷ num_directions` frames) or a vector with the number
+of frames (phases) of each direction, which may differ between directions (their sum has to be `n`).
+"""
+direction_ranges(n::Integer, num_directions::Integer) = (nph = n ÷ num_directions; [(d-1)*nph+1:d*nph for d in 1:num_directions])
+function direction_ranges(n::Integer, counts::AbstractVector{<:Integer})
+    sum(counts) == n || error("The numbers of phases of the directions ($(join(counts, '+')) = $(sum(counts))) must add up to the number of frames ($n).")
+    ends = cumsum(counts)
+    return [ends[d]-counts[d]+1:ends[d] for d in eachindex(counts)]
+end
+
+"""
     do_correct_drift(dat, num_directions; verbose=false)
 
 Corrects drift in the data by aligning slices based on the first slice of each direction.
@@ -8,18 +22,17 @@ This function assumes that the data `dat` is organized such that each direction'
 
 + Parameters:
 `dat` is expected to be a 3D array where the last dimension represents different directions.
-`num_directions` specifies how many directions are present in the data.
+`num_directions` specifies how many directions are present in the data (or, as a vector, the number of images of each direction, see `direction_ranges`).
 """
 function do_correct_drift(dat, num_directions; verbose=false)
     res = copy(dat) # make a copy to avoid modifying the original data
-    slices_per_direction = size(dat, ndims(dat)) ÷ num_directions
-    wf_proj = sum(slice(dat,ndims(dat),1:slices_per_direction), dims=ndims(dat))
+    rngs = direction_ranges(size(dat, ndims(dat)), num_directions)
+    wf_proj = sum(slice(dat,ndims(dat),rngs[1]), dims=ndims(dat))
     # wf_proj = FindShift.damp_edge_outside(wf_proj)
-    for d in 2:num_directions
-        s_start = 1 + (d-1) * slices_per_direction
-        s_end = d * slices_per_direction
-        myslice = slice(dat, ndims(dat),s_start:s_end)
-        res_slice = slice(res, ndims(dat),s_start:s_end)
+    for d in 2:length(rngs)
+        s_start, s_end = first(rngs[d]), last(rngs[d])
+        myslice = slice(dat, ndims(dat),rngs[d])
+        res_slice = slice(res, ndims(dat),rngs[d])
         wf_proj_ts = sum(myslice, dims=ndims(dat))
         # wf_proj_ts = FindShift.damp_edge_outside(wf_proj_ts)
         # shift_vec = find_shift_iter(wf_proj, wf_proj_ts)
@@ -113,9 +126,8 @@ function preprocess_sim(dat; bg = 100f0, num_directions=nothing, reg_const=2f0, 
         end
         if (enforce_mean) # enforces all directions to have the same widefield mean projection
             all_mean = lowpass_xy(mean(dat, dims=ndims(dat)), mean_lowpass)
-            num_phases = size(dat, ndims(dat)) ÷ num_directions
-            for d in 1:num_directions
-                sub_data = slice(dat, ndims(dat), (d-1)*num_phases+1:d*num_phases)
+            for rng in direction_ranges(size(dat, ndims(dat)), num_directions)
+                sub_data = slice(dat, ndims(dat), rng)
                 sub_mean = lowpass_xy(mean(sub_data, dims=ndims(sub_data)), mean_lowpass)
                 sub_data .*= all_mean .* sub_mean ./ (abs2.(sub_mean) .+ abs2(reg_const))
             end

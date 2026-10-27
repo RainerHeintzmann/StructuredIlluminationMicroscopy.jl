@@ -16,8 +16,10 @@ The function returns the estimated parameters for the SIM image.
 - `suppress_sigma`: The width of the center to suppress for the cross-correlation, if > 0. As a ratio of the size. Default is 0. If >0 a suppression of 100% is assumed
 - `num_directions`: Number of directions. Default is 0 which means each frame contains all directions. 
                     If provided, it is assumed that the trailing dimension is subdivided into directions and phases per direction.
+                    A vector gives the number of images (phases) of each direction, if they differ (see `direction_ranges`).
 - `ideal_strength`: If true, the strength of the peaks is set to 1. Default is true.
 - `implied_higher_orders`: If not zero, this specifies the number of higher orders which are implied from the first order. Default is 0.
+                    A vector gives the number for each direction (with a vector `num_directions`).
 - `amp_magnitudes`: Optional parameter to specify the magnitudes of the amplitudes of the peaks. If `nothing`, the amplitudes are estimated from the data.
 - `otf_moebius`: A moebius-polynomial fraction based OTF modification, to use similar as otf_exponent. Default is 1.0.
     It has a different performance particularly at high frequencies suppressing them not as strongly.
@@ -48,15 +50,18 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
                             otf_exponent = 1.0, otf_moebius = 1.0, amp_magnitudes=nothing, individual_otfs=false,
                             show_quality=true, notch_filter=nothing, verbose=true, phase_only=false, method=:FindIter, scale = 200, roi_size = 2,
                             normalize_overlap=false, refine=true)
-    if (num_directions > 0)
-        num_phases = size(dat, ndims(dat)) ÷ num_directions;
-        if num_phases * num_directions != size(dat, ndims(dat))
+    n_dirs = num_directions isa AbstractVector ? length(num_directions) : num_directions
+    if (n_dirs > 0)
+        if !(num_directions isa AbstractVector) && (size(dat, ndims(dat)) ÷ num_directions) * num_directions != size(dat, ndims(dat))
             error("The number of phases times the number of directions must equal the number of frames.")
         end
+        dir_rngs = direction_ranges(size(dat, ndims(dat)), num_directions)
+        higher_orders(d) = implied_higher_orders isa AbstractVector ? implied_higher_orders[d] : implied_higher_orders
         spf = nothing
         for_print = "("
-        for d in 1:num_directions
-            sub_data = slice(dat, ndims(dat), (d-1)*num_phases+1:d*num_phases) # pick all phases of one direction
+        for d in 1:n_dirs
+            num_phases = length(dir_rngs[d])
+            sub_data = slice(dat, ndims(dat), dir_rngs[d]) # pick all phases of one direction
             k_vec = nothing
             if !isnothing(k_vecs)
                 k_vec = k_vecs[d]
@@ -66,7 +71,7 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
             end
             spf_sub = estimate_parameters(sub_data, mypsf, refdat; k_vecs=k_vec,  
                                             subtract_mean=subtract_mean, suppress_sigma=suppress_sigma, 
-                                            num_directions=0, ideal_strength=ideal_strength, implied_higher_orders=implied_higher_orders,
+                                            num_directions=0, ideal_strength=ideal_strength, implied_higher_orders=higher_orders(d),
                                             amp_magnitudes=amp_magnitudes, otf_exponent=otf_exponent, otf_moebius = otf_moebius, individual_otfs=individual_otfs,
                                             show_quality=show_quality, notch_filter=notch_filter, verbose=verbose, phase_only=phase_only, method=method, scale=scale, roi_size=roi_size,
                                             normalize_overlap=normalize_overlap, refine=refine)
@@ -96,7 +101,7 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
             end
 
             peaks = kvecs_to_peak(spf_sub.k_peak_pos[2:end], size(dat))
-            if (implied_higher_orders != 0)
+            if (higher_orders(d) != 0)
                 for_print *= " $(peaks[1])"
             else
                 for_print *= " $(peaks)"
