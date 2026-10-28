@@ -79,12 +79,16 @@ Parameters:
 + `num_orders` : vector with the number of orders of every direction (including the zero order, as in `generate_peaks`)
 + `zero_order_blocked` : vector of Bools. A direction with a blocked zero order is a two-beam pattern: the pattern moves twice as far in phase as the
         grating (the phase progression of its orders is doubled), and it has no axial modulation (`k1z` is not used).
+        `k1` is the frequency of the first order of an unblocked direction (the grating frequency). Without the zero order only the two side beams
+        remain; their interference lies at twice that frequency, so the orders `o` of a blocked direction are at `blocked_scale * o * k1`
+        (`blocked_scale = 2`): the outer peaks of blocked and not blocked directions coincide.
 + `phi0`, `k1`, `k1z` : as in `generate_peaks`
++ `blocked_scale` : position factor of the peaks of blocked directions (default 2; 1 gives the peaks of `generate_peaks`)
 
-For identical entries this gives the peaks of `generate_peaks` (with the phases doubled for blocked directions).
+For identical, not blocked entries this gives the peaks of `generate_peaks`.
 """
 function generate_peaks_directions(num_phases::AbstractVector{<:Integer}, num_orders::AbstractVector{<:Integer}, zero_order_blocked::AbstractVector{Bool},
-                                   phi0=0.0, k1=0.9, k1z=0.0; individual_otfs=false)
+                                   phi0=0.0, k1=0.9, k1z=0.0; individual_otfs=false, blocked_scale=2.0)
     D = length(num_phases)
     (length(num_orders) == D && length(zero_order_blocked) == D) || error("num_phases, num_orders and zero_order_blocked need one entry per direction.")
     all(>=(2), num_orders) || error("every direction needs at least 2 orders (the zero order and the first order).")
@@ -95,7 +99,7 @@ function generate_peaks_directions(num_phases::AbstractVector{<:Integer}, num_or
     for d in 1:D
         phi = pi * (d - 1) / D + phi0
         for o in 1:num_orders[d]-1
-            k = k1 * o
+            k = k1 * o * (zero_order_blocked[d] ? blocked_scale : 1.0)
             # medium orders (not the highest one) have an axial component, unless the pattern is purely lateral
             has_kz = 0 < o < num_orders[d] - 1 && !zero_order_blocked[d]
             push!(k_peak_pos, (k * cos(phi), k * sin(phi), has_kz ? k1z : 0.0))

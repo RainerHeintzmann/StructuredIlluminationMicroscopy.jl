@@ -17,11 +17,21 @@ end
         kp, ph, st, oi, op = generate_peaks(3nph, 3, 0.3, no, 0.7, true, kz)
         ph = copy(ph)
         blocked && (ph[:, 2:end] .= mod.(2 .* ph[:, 2:end], 2pi))      # the phase progression doubles
-        kp2, ph2, st2, oi2, op2 = generate_peaks_directions(fill(nph, 3), fill(no, 3), fill(blocked, 3), 0.3, 0.7, 0.2)
+        kp2, ph2, st2, oi2, op2 = generate_peaks_directions(fill(nph, 3), fill(no, 3), fill(blocked, 3), 0.3, 0.7, 0.2; blocked_scale=1.0)
         @test all(isapprox.(collect.(kp), collect.(kp2); atol=1e-12))
         @test isapprox(ph, ph2; atol=1e-9)
         @test st == st2 && oi == oi2 && op == op2
     end
+end
+
+@testset "blocked directions: the outer peaks of blocked and not blocked directions coincide" begin
+    kp, = generate_peaks_directions([3, 5, 3], [2, 3, 2], [true, false, true], 0.0, 0.3, 0.2)
+    r = [hypot(p[1], p[2]) for p in kp]
+    @test length(kp) == 1 + 1 + 2 + 1
+    @test r[2] ≈ 0.6 && r[5] ≈ 0.6                # blocked: the interference of the two side beams, at 2 k1
+    @test r[3] ≈ 0.3 && r[4] ≈ 0.6                # not blocked: first order at k1 (centre beam with a side beam), second order at 2 k1
+    kp1, = generate_peaks_directions([3, 5, 3], [2, 3, 2], [true, false, true], 0.0, 0.3, 0.2; blocked_scale=1.0)
+    @test hypot(kp1[2][1], kp1[2][2]) ≈ 0.3         # blocked_scale = 1: the plain positions
 end
 
 @testset "generate_peaks_directions: 3 / 5 / 3 phases and orders, zero order blocked in the outer directions" begin
