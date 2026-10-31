@@ -320,7 +320,9 @@ function pre_allocate!(sim_data, prep, rp)
         #         result_rft=result_rft, result_rft_tmp=result_rft_tmp,
         #         order=order, ftorder=ftorder, result=result, slice_by_slice=rp.slice_by_slice) # , result_tmp=result_tmp
     else
-        prep.result_rft_tmp = get_upsampled_rft(sim_data, prep)
+        # a scratch spectrum of its own (not the memory of `result_rft`, which `get_upsampled_rft` would return): the
+        # final filtering and inverse FT (`recon_sim_finalize!`) leave `result_rft` untouched and allocate nothing
+        prep.result_rft_tmp = similar(prep.result_rft)
         rsize = get_result_size(imsz, rp.upsample_factor)
         prep.result =  similar(sim_data, RT, rsize...)
         prep.ftorder =  similar(sim_data, CT, imsz...)
@@ -583,22 +585,84 @@ function recon_sim_orders(sim_data, prep, sp::SIMParams)
 end
 
 """
-    recon_sim_finalize(prep, res=prep.result_rft, bsz=get_result_size(...); final_filter=prep.final_filter)
+    recon_sim_finalize!(dst, prep, res=prep.result_rft, bsz=nothing; final_filter=prep.final_filter, shift=true)
+
+Second part of `recon_sim`, written into the preallocated real array `dst` of size `bsz` (e.g. `prep.result`): applies
+the final frequency-dependent filter to the unfiltered Fourier-space result `res` and performs the inverse real-FFT.
+`res` is not modified (it can be reused to change the filter and repeat this step).
+
+No array is allocated (only a few small broadcast objects): the filtered spectrum is built in the scratch array
+`prep.result_rft_tmp` and transformed by the preallocated `prep.plan_irfft`. The two `fftshift`s
+(`rifftshift!` of the spectrum and, for `shift=true`, `fftshift` of the result) are not performed as permutations:
+for even sizes a shift by half the size is a modulation with `(-1)^index` in the other domain, which is folded into
+the single multiplication of the spectrum and a sign change of the result. This needs `size(prep.result_rft_tmp) ==
+size(res)` (not the same memory) and even sizes (size-1 axes are fine), and `prep.plan_irfft` for this size; otherwise
+the allocating computation of the former version is used.
+"""
+function recon_sim_finalize!(dst, prep, res=prep.result_rft, bsz=nothing; final_filter=prep.final_filter, shift=true)
+    if isnothing(bsz)
+        prod(size(prep.result)) > 1 || error("result size unknown: pass bsz or prepare with do_preallocate=true")
+        bsz = size(prep.result)
+    end
+    bsz = Tuple(bsz)
+    size(dst) == bsz || throw(DimensionMismatch("dst has size $(size(dst)), the result size is $bsz"))
+    N = length(bsz)
+    tmp = prep.result_rft_tmp
+    modulate = all(d -> bsz[d] == 1 || iseven(bsz[d]), shift ? (1:N) : (2:N))
+    if !(modulate && size(tmp) == size(res) && !Base.mightalias(tmp, res))
+        dst .= _finalize_alloc(prep, res, bsz, final_filter, shift)
+        return dst
+    end
+    # spectrum (centred index j along the axes 2:N, 0 ≤ j along the first): for shift=true the fftshift of the result is
+    # a factor (-1)^j on every axis; the factor (-1)^n on the result of the axes 2:N (and the constant (-1)^(N_d/2)
+    # of a shifted axis) replaces the rifftshift of the spectrum.
+    sidx = _index_arrays(size(res), ntuple(d -> shift && bsz[d] > 1, N))
+    sgn = Broadcast.broadcasted(_parity_sign, sidx...)
+    if prod(size(final_filter)) > 1
+        Broadcast.materialize!(tmp, Broadcast.broadcasted(*, Broadcast.broadcasted(*, res, final_filter), sgn))
+    else
+        Broadcast.materialize!(tmp, Broadcast.broadcasted(*, res, sgn))
+    end
+    if size(prep.plan_irfft) == size(tmp)
+        mul!(dst, prep.plan_irfft, tmp)       # (a c2r transform overwrites its input: the scratch array)
+    else
+        dst .= irfft(tmp, bsz[1])
+    end
+    ridx = _index_arrays(bsz, ntuple(d -> d >= 2 && bsz[d] > 1, N))
+    c = shift ? prod(d -> bsz[d] > 1 ? (-1)^(bsz[d] ÷ 2) : 1, 2:N; init=1) : 1
+    Broadcast.materialize!(dst, Broadcast.broadcasted(*, dst, Broadcast.broadcasted(_parity_sign, ridx...), c))
+    return dst
+end
+
+# (-1)^(sum of 0-based indices)
+@inline _parity_sign(args...) = 1 - 2 * (sum(args) & 1)
+# lazy 0-based index arrays along the axes `active` (scalar 0 for the others): no data is allocated
+_index_arrays(sz, active) = ntuple(d -> active[d] ? reshape(0:sz[d]-1, ntuple(i -> i == d ? sz[d] : 1, length(sz))) : 0, length(sz))
+
+# the allocating computation (odd sizes, or no usable scratch array)
+function _finalize_alloc(prep, res, bsz, final_filter, shift)
+    resf = (prod(size(final_filter)) > 1) ? res .* final_filter : copy(res)
+    res_tmp = similar(resf)
+    rifftshift!(res_tmp, resf)
+    result = irfft(res_tmp, bsz[1])
+    return shift ? fftshift(result) : result
+end
+
+"""
+    recon_sim_finalize(prep, res=prep.result_rft, bsz=get_result_size(...); final_filter=prep.final_filter, shift=true)
 
 Second part of `recon_sim`: applies the final frequency-dependent filter to the unfiltered Fourier-space result
 `res` and performs the inverse real-FFT. `res` is not modified, such that the filter can be changed
-(see `update_final_filter!`) and this step repeated quickly. Returns the real-space result.
+(see `update_final_filter!`) and this step repeated quickly. Returns the real-space result as a new array (the only
+allocation); see [`recon_sim_finalize!`](@ref) to write into a preallocated array.
 """
 function recon_sim_finalize(prep, res=prep.result_rft, bsz=nothing; final_filter=prep.final_filter, shift=true)
     if isnothing(bsz)
         prod(size(prep.result)) > 1 || error("result size unknown: pass bsz or prepare with do_preallocate=true")
         bsz = size(prep.result)
     end
-    resf = (prod(size(final_filter)) > 1) ? res .* final_filter : copy(res)
-    res_tmp = similar(resf)
-    rifftshift!(res_tmp, resf)
-    result = irfft(res_tmp, bsz[1])
-    return shift ? fftshift(result) : result
+    dst = similar(res, real(eltype(res)), Tuple(bsz)...)
+    return recon_sim_finalize!(dst, prep, res, bsz; final_filter=final_filter, shift=shift)
 end
 
 """
@@ -640,9 +704,11 @@ Parameters:
 + `sim_data::Array` : simulated SIM data
 + `prep::Tuple` : preparation data
 + `sp::SIMParams` : SIMParams object
++ `inplace=false` : return the preallocated `prep.result` (written without allocating the final filtering and inverse FT,
+  see `recon_sim_finalize!`), valid until the next call, instead of a new array. Not for `slice_by_slice`.
 
 """
-function recon_sim(sim_data, prep, sp::SIMParams; relative_background=nothing)
+function recon_sim(sim_data, prep, sp::SIMParams; relative_background=nothing, inplace=false)
     # relative_background: see `deconvolve_result` (only used with deconvolution)
     sz = size(sim_data)
     imsz = sz[1:end-1]
@@ -671,6 +737,9 @@ function recon_sim(sim_data, prep, sp::SIMParams; relative_background=nothing)
     if (prod(size(prep.rec_otf))>1) # use deconvolution
         @info "deconvolving with rec_otf, iterations: $(prep.deconv_iterations)"
         return deconvolve_result(prep, res, bsz; relative_background=relative_background)
+    elseif inplace && size(prep.result) == Tuple(bsz)
+        # no allocation: the result is written into (and is) the preallocated `prep.result`, valid until the next call
+        return recon_sim_finalize!(prep.result, prep, res, bsz)
     else
         return recon_sim_finalize(prep, res, bsz)
     end
