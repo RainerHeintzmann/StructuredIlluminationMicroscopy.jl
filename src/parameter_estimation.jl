@@ -36,6 +36,10 @@ The function returns the estimated parameters for the SIM image.
 - `normalize_overlap`: if true, the correlation is divided by its spectral-overlap envelope before the peak is
     located (see FindShift's `get_subpixel_correl`). Removes the bias of the peak towards zero frequency,
     e.g. for peaks beyond the OTF cutoff (TIRF). Default is `false`.
+- `estimate_orders`: if true (with `implied_higher_orders > 0` and a PSF), the strengths and the phase offsets of the implied higher orders are
+    measured from the data without a model (`estimate_order_strengths`, needed for non-linear SIM where they are neither 1 nor `m` times
+    the phase of the first order) instead of being assumed. Default is `false`. `order_kwargs` are passed to `estimate_order_strengths`
+    (e.g. `(haze_symmetry=0.15,)` for a 2-D slice of a thick sample).
 - `refine`: if false, the (subpixel) peak positions `k_vecs` are used as given and only the phases and strengths
     are estimated, e.g. for peaks whose positions follow from other, better measurable peaks. Default is `true`.
 
@@ -49,7 +53,7 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
                             num_directions=0, ideal_strength=true, implied_higher_orders=0,
                             otf_exponent = 1.0, otf_moebius = 1.0, amp_magnitudes=nothing, individual_otfs=false,
                             show_quality=true, notch_filter=nothing, verbose=true, phase_only=false, method=:FindIter, scale = 200, roi_size = 2,
-                            normalize_overlap=false, refine=true)
+                            normalize_overlap=false, refine=true, estimate_orders=false, order_kwargs=(;))
     n_dirs = num_directions isa AbstractVector ? length(num_directions) : num_directions
     if (n_dirs > 0)
         if !(num_directions isa AbstractVector) && (size(dat, ndims(dat)) ÷ num_directions) * num_directions != size(dat, ndims(dat))
@@ -74,7 +78,7 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
                                             num_directions=0, ideal_strength=ideal_strength, implied_higher_orders=higher_orders(d),
                                             amp_magnitudes=amp_magnitudes, otf_exponent=otf_exponent, otf_moebius = otf_moebius, individual_otfs=individual_otfs,
                                             show_quality=show_quality, notch_filter=notch_filter, verbose=verbose, phase_only=phase_only, method=method, scale=scale, roi_size=roi_size,
-                                            normalize_overlap=normalize_overlap, refine=refine)
+                                            normalize_overlap=normalize_overlap, refine=refine, estimate_orders=estimate_orders, order_kwargs=order_kwargs)
             if (d == 1)
                 spf = spf_sub
             else
@@ -160,10 +164,15 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
         peak_phases[p, 1] = 0 # peak phase of zero order is always zero
         peak_phases[p, 2:2+length(rel_corr)-1] .= angle.(rel_corr)
         ideal_magnitudes = isnothing(amp_magnitudes) ? 0.5  : order_strengths_from_amp(amp_magnitudes)[2:end]
-        peak_strengths[p, 2:end] .= (ideal_strength) ? ideal_magnitudes : abs.(rel_corr)
+        # measured peaks (the first order of each given k-vector): their correlation magnitude, or the ideal one
+        nmeas = length(rel_corr)
+        peak_strengths[p, 2:1+nmeas] .= (ideal_strength) ? (ideal_magnitudes isa Number ? ideal_magnitudes : ideal_magnitudes[1:nmeas]) : abs.(rel_corr)
         if (implied_higher_orders > 0)
             for h in 1:implied_higher_orders
                 peak_phases[p, h+2] = angle.(rel_corr[1]) * (h+1)
+                # implied orders are not measured here (`estimate_orders` does that afterwards): the ideal strength. (Formerly
+                # `ideal_strength=false` broadcast the first order's magnitude to them.)
+                peak_strengths[p, h+2] = ideal_magnitudes isa Number ? ideal_magnitudes : ideal_magnitudes[min(h + 1, length(ideal_magnitudes))]
             end
         end
 
@@ -189,8 +198,16 @@ function estimate_parameters(dat, mypsf=nothing, refdat=nothing; k_vecs=nothing,
     otf_phases = zeros(length(k_peak_pos))    
     k_peak_pos2 = [d for d in k_peak_pos]
     psfsz = size(dat)[1:ndims(dat)-1]
+    orig_psf = mypsf
     mypsf = (isnothing(mypsf)) ? delta(psfsz) : mypsf
     spf = SIMParams(mypsf, k_peak_pos2, peak_phases, peak_strengths, otf_indices, otf_phases, otf_exponent);
+    if estimate_orders
+        implied_higher_orders > 0 || @warn "estimate_orders has no effect without implied_higher_orders."
+        if implied_higher_orders > 0
+            (isnothing(orig_psf) || ndims(dat) != 3) && error("estimate_orders needs the PSF and images [x, y, images].")
+            spf, _ = estimate_order_strengths(dat, spf, mypsf; order_kwargs...)
+        end
+    end
     if (show_quality)
         println("conditioning quality of unmxing submatrix is $(1 / cond(weight_matrix(spf))), (1.0 is best)")
     end

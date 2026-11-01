@@ -105,6 +105,10 @@ Fields:
 + `deconv_iterations::Int` : the number of iterations for deconvolution, default 16
 + `keep_hf::Bool` : whether to keep the high-frequency components of the OTFs (default: false)
 + `otf_radius::Float64` : the relative radius of the pupil compared to the sampling limit, used for the OTF masks. zero means that a threshold is used instead of a radius. default is 0.0
++ `strength_weighting::Bool` : weight each order by its strength relative to the zero order, the matched filter (gain `s_n/s_0`, which is 1 for the equal strengths of
+  a fully modulated grating). The order images are normalized to equal noise, so their signal is proportional to the strength; without the weighting a weak order
+  (e.g. a high order of non-linear SIM, or a direction of low contrast) gets the weight of a strong one and adds its noise. Only matters for unequal strengths.
+  Default is false (the former behaviour).
 
 """
 mutable struct ReconParams
@@ -127,6 +131,7 @@ mutable struct ReconParams
     keep_hf::Bool # whether to keep the high-frequency components of the OTFs (default: false)
     otf_radius::Float64 # the radius of the pupil, used for the otf masks. zero means that a threshold is used instead of a radius
     deconv_iterations::Int # the number of iterations used for deconvolution
+    strength_weighting::Bool # weight the orders by their strength (matched filter), see above
 
     function ReconParams(; # constructor with default values
         notch = nothing,
@@ -142,7 +147,7 @@ mutable struct ReconParams
         double_use=true,
         preshift_otfs=true,
         slice_by_slice=false, do_deconvolve=false, deconv_lambda=1.2, keep_hf=false,
-        background = 0.0, deconv_iterations = 16)
+        background = 0.0, deconv_iterations = 16, strength_weighting = false)
         otf_radius = 0.0 # 0 means that a threshold is used instead of a radius
         new(notch, Float64(suppression_sigma), 
             Float64(suppression_strength), 
@@ -150,7 +155,7 @@ mutable struct ReconParams
             reference_slice,
             Float64(wiener_eps),
             Float64(hgoal_thresh),
-            do_preallocate, use_measure, double_use, preshift_otfs, hgoal, slice_by_slice, do_deconvolve, deconv_lambda, background, keep_hf, otf_radius, deconv_iterations)
+            do_preallocate, use_measure, double_use, preshift_otfs, hgoal, slice_by_slice, do_deconvolve, deconv_lambda, background, keep_hf, otf_radius, deconv_iterations, strength_weighting)
     end
 end
 

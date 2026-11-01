@@ -50,6 +50,7 @@ for the unmixed zero order (at the center).
 """
 function correct_pinv_weight_matrix(mypinv)
     res_variances = abs2.(mypinv) * ones(size(mypinv, 2))
+    res_variances[res_variances .== 0] .= 1          # a peak that is absent in all images has a zero row: leave it zero (not 0/0)
     pinv_var_normed = mypinv ./ sqrt.(res_variances) # return the variances of the orders
     return pinv_var_normed / mean(pinv_var_normed[1,:])
 end

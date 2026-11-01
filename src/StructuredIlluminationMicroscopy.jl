@@ -89,10 +89,11 @@ module StructuredIlluminationMicroscopy
     export get_shift_subpixel, pinv_weight_matrix, shift_subpixel!, shift_subpixel, shift_subpixel_fft, dot_mul_last_dim!, add!, conj_add!
     export rfft_crop, rfft_size, rfftshift, rifftshift, rfftshift!, rifftshift!, get_rft_center
     export swap_vals!, fftshift!, IntType, force_integer_pixels, estimate_prep_mem, print_mem_usage
-    export estimate_parameters, estimate_axial, apply_photon_noise
+    export estimate_parameters, estimate_axial, apply_photon_noise, estimate_order_strengths
     export preprocess_sim
     export psf_notch, gaussian_notch, remove_oof_light
     export simulate_sim, simulate_sim_3d, get_non_linear_saturation
+    export NonlinearScheme, ActivationDepletionReadout, PeriodicProfile, scheme_profile, scheme_coefficients, scheme_strengths, scheme_truncation
     export get_otf_weights, kz_otf_extend, test_unmix_real
     export notch_filter
     export create_grating_param_file, create_para_list, optimize_grating_sum, find_optimum_set
@@ -106,10 +107,12 @@ module StructuredIlluminationMicroscopy
     include("preprocess.jl")    
     include("sim_structures.jl")
     include("utils.jl")
+    include("nonlinear_schemes.jl")
     include("simulate_sim.jl")
     include("lattice.jl")
     include("classical_sim.jl")
     include("parameter_estimation.jl")
+    include("order_strengths.jl")
     include("axial_estimation.jl")
     include("notch_filters.jl")
     include("find_grating.jl")

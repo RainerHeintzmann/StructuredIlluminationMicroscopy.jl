@@ -8,9 +8,12 @@ Parameters:
 + `num_orders::Int` : number of orders
 + `k0::Float64`: peak frequency of first order (relative to the Nyquist frequency of the image)
 + individual_otfs: if true, each k-shift gets its own otf index assigned in the peak generation (default: false)
++ `scheme`: a non-linear illumination scheme (`NonlinearScheme`, e.g. `ActivationDepletionReadout`): the strengths and phase offsets of the orders
+  are those of its effective pattern instead of all 1 (default `nothing`). Not for lattices.
 """
-function generate_peaks(num_images::Int=9, num_directions::Int=3, phi0=0.0, num_orders::Int=2, k1 = 0.9, single_zero_order=true, k1z = 0.0; use_lattice=false, lattice_shift=nothing, individual_otfs=false)
+function generate_peaks(num_images::Int=9, num_directions::Int=3, phi0=0.0, num_orders::Int=2, k1 = 0.9, single_zero_order=true, k1z = 0.0; use_lattice=false, lattice_shift=nothing, individual_otfs=false, scheme=nothing)
     if use_lattice
+        isnothing(scheme) || error("A non-linear scheme is not supported for lattice illumination.")
         # All directions in every image (sum of gratings); the images are
         # translations p * lattice_shift (raw pixels), optimized if not given.
         num_orders > 2 && @warn "Lattice SIM currently supports two orders; ignoring num_orders = $num_orders."
@@ -44,6 +47,8 @@ function generate_peaks(num_images::Int=9, num_directions::Int=3, phi0=0.0, num_
 
     peak_phases = zeros(num_images, num_peaks)
     peak_strengths = zeros(num_images, num_peaks)
+    # strengths and phase offsets of the orders 0 … num_orders-1 (all 1 and 0 without a scheme)
+    ord_strength, ord_phase = isnothing(scheme) ? (ones(num_orders), zeros(num_orders)) : scheme_strengths(scheme, num_orders)
     phases_per_cycle = num_images ÷ num_directions
     current_peak = 1
     for p in 0:num_images-1 # starts at zero
@@ -53,8 +58,8 @@ function generate_peaks(num_images::Int=9, num_directions::Int=3, phi0=0.0, num_
             for o in 0:num_orders-1
                 if (o > 0 || d==0 || single_zero_order == false)
                     if (o == 0 || d == current_d)
-                        peak_phases[p+1, current_peak] = mod(2pi*o*p/phases_per_cycle, 2pi)
-                        peak_strengths[p+1, current_peak] = 1.0
+                        peak_phases[p+1, current_peak] = mod(2pi*o*p/phases_per_cycle + ord_phase[o+1], 2pi)
+                        peak_strengths[p+1, current_peak] = ord_strength[o+1]
                     end
                     current_peak += 1
                 end
@@ -84,15 +89,18 @@ Parameters:
         (`blocked_scale = 2`): the outer peaks of blocked and not blocked directions coincide.
 + `phi0`, `k1`, `k1z` : as in `generate_peaks`
 + `blocked_scale` : position factor of the peaks of blocked directions (default 2; 1 gives the peaks of `generate_peaks`)
++ `scheme` : a non-linear illumination scheme (see `generate_peaks`); not for directions with a blocked zero order
 
 For identical, not blocked entries this gives the peaks of `generate_peaks`.
 """
 function generate_peaks_directions(num_phases::AbstractVector{<:Integer}, num_orders::AbstractVector{<:Integer}, zero_order_blocked::AbstractVector{Bool},
-                                   phi0=0.0, k1=0.9, k1z=0.0; individual_otfs=false, blocked_scale=2.0)
+                                   phi0=0.0, k1=0.9, k1z=0.0; individual_otfs=false, blocked_scale=2.0, scheme=nothing)
     D = length(num_phases)
     (length(num_orders) == D && length(zero_order_blocked) == D) || error("num_phases, num_orders and zero_order_blocked need one entry per direction.")
     all(>=(2), num_orders) || error("every direction needs at least 2 orders (the zero order and the first order).")
+    isnothing(scheme) || !any(zero_order_blocked) || error("A non-linear scheme is not supported for directions with a blocked zero order.")
     num_images = sum(num_phases)
+    ord_strength, ord_phase = isnothing(scheme) ? (ones(maximum(num_orders)), zeros(maximum(num_orders))) : scheme_strengths(scheme, maximum(num_orders))
     # peak 1: the shared zero order, then the orders 1 ... num_orders-1 of every direction
     k_peak_pos = NTuple{3, Float64}[(0.0, 0.0, 0.0)]
     peak_dir = [0]; peak_order = [0]
@@ -116,8 +124,8 @@ function generate_peaks_directions(num_phases::AbstractVector{<:Integer}, num_or
                 (peak_dir[i] == 0 || peak_dir[i] == d) || continue
                 ph = mod(2pi * peak_order[i] * q / num_phases[d], 2pi)
                 zero_order_blocked[d] && (ph = mod(2 * ph, 2pi))
-                peak_phases[first_image + q + 1, i] = ph
-                peak_strengths[first_image + q + 1, i] = 1.0
+                peak_phases[first_image + q + 1, i] = mod(ph + ord_phase[peak_order[i] + 1], 2pi)
+                peak_strengths[first_image + q + 1, i] = ord_strength[peak_order[i] + 1]
             end
         end
         first_image += num_phases[d]

@@ -47,6 +47,8 @@ function separate_and_place_orders(sim_data, sp::SIMParams, prep)
     # end
     imsz = expand_size(imsz, ntuple((d)->1, length(sp.k_peak_pos[1]))) 
     for n=1:num_orders
+        # a peak that is not present in any image (strength 0, e.g. an order that could not be measured) has nothing to unmix
+        (n > 1 && all(abs.(prep.pinv_weight_mat[n, :]) .<= 1e-7)) && continue
         # apply subpixel shifts
         ordershift = .-sp.k_peak_pos[n] .* imsz ./ 2
         ordershift = ntuple((d)-> (d <= 2) ? ordershift[d] : 0.0, length(ordershift))
@@ -483,6 +485,18 @@ function recon_sim_prepare(sim_data, sp::SIMParams, rp::ReconParams; use_final_f
         prep.order =  similar(sim_data, CT, imsz...)
         prep.plan_fft! = (rp.use_measure) ? plan_fft!(prep.order, flags=FFTW.MEASURE) : plan_fft!(prep.order)
 
+        if rp.strength_weighting
+            # matched filter: the order images have equal noise, order n carries the coefficient c_n/c_0 = s_n/(2 s_0). The weights below
+            # already assume the full modulation of a linear grating (all strengths equal), so the gain is s_n/s_0, 1 for that case. The
+            # scaled OTFs also enter the normalization over the overlapping orders in `normalize_otfs!`.
+            for n in eachindex(prep.otfs)
+                idx = findall(sp.peak_strengths[:, n] .> 0)
+                isempty(idx) && continue
+                s0 = max(sum(sp.peak_strengths[:, 1]) / size(sp.peak_strengths, 1), eps())
+                gain = n == 1 ? 1.0 : (sum(sp.peak_strengths[idx, n]) / length(idx)) / s0
+                prep.otfs[n] .*= eltype(prep.otfs[n])(gain)
+            end
+        end
         normalize_otfs!(prep, rp; otf_masks=otf_masks, keep_hf = rp.keep_hf)
 
         if (rp.do_preallocate)
