@@ -11,8 +11,8 @@ so such a scheme only needs the harmonic strengths and phase offsets `E(v) = c_0
 abstract type NonlinearScheme end
 
 """
-    ActivationDepletionReadout(; act_sat=1.0, act_mod=1.0, act_shift=0.0,
-                                 depl_sat=8.0, depl_mod=1.0, read_mod=1.0, read_shift=0.0)
+    ActivationDepletionReadout(; act_sat=1.0, act_mod=1.0, act_shift=π,
+                                 depl_sat=8.0, depl_mod=1.0, read_mod=1.0, read_shift=π)
 
 Positive-contrast scheme with three stages, all with the same period (phase `v`; the dark point of the depletion pattern is at `v = 0`):
 
@@ -28,11 +28,24 @@ The emitted signal is `E(v) = A · S · R`. Angles are in radian; all intensitie
 Base.@kwdef struct ActivationDepletionReadout <: NonlinearScheme
     act_sat::Float64 = 1.0
     act_mod::Float64 = 1.0
-    act_shift::Float64 = 0.0
+    act_shift::Float64 = π
     depl_sat::Float64 = 8.0
     depl_mod::Float64 = 1.0
     read_mod::Float64 = 1.0
-    read_shift::Float64 = 0.0
+    read_shift::Float64 = π
+end
+
+"""
+    SingletSaturation(; sat=4.0, mod=1.0)
+
+Saturation of the excited state (singlet saturation) of the fluorophores by the excitation pattern
+`I(v) = sat · (1 + mod · cos v)` (mean intensity in units of the saturation intensity, as `depl_sat` above):
+`E(v) = I / (1 + I)`. The emission is the object times `E`, so the saturation depends on the excitation only, not on the
+object brightness. `mod = 1` is a full-contrast pattern.
+"""
+Base.@kwdef struct SingletSaturation <: NonlinearScheme
+    sat::Float64 = 4.0
+    mod::Float64 = 1.0
 end
 
 """
@@ -54,6 +67,10 @@ function scheme_profile(s::ActivationDepletionReadout, v)
     S = exp(-s.depl_sat * (1 - s.depl_mod * cos(v)))
     R = 1 + s.read_mod * cos(v - s.read_shift)
     return A * S * R
+end
+function scheme_profile(s::SingletSaturation, v)
+    I = s.sat * (1 + s.mod * cos(v))
+    return I / (1 + I)
 end
 scheme_profile(s::PeriodicProfile, v) = s.f(v)
 

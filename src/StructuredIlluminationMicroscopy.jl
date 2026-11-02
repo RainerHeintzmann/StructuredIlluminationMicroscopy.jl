@@ -93,7 +93,7 @@ module StructuredIlluminationMicroscopy
     export preprocess_sim
     export psf_notch, gaussian_notch, remove_oof_light
     export simulate_sim, simulate_sim_3d, get_non_linear_saturation
-    export NonlinearScheme, ActivationDepletionReadout, PeriodicProfile, scheme_profile, scheme_coefficients, scheme_strengths, scheme_truncation
+    export NonlinearScheme, ActivationDepletionReadout, SingletSaturation, PeriodicProfile, scheme_profile, scheme_coefficients, scheme_strengths, scheme_truncation
     export get_otf_weights, kz_otf_extend, test_unmix_real
     export notch_filter
     export create_grating_param_file, create_para_list, optimize_grating_sum, find_optimum_set

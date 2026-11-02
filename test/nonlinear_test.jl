@@ -133,3 +133,12 @@ end
     _, info3 = estimate_order_strengths(Float64.(dropdims(data[:, :, :, 1:3nd]; dims=3)), sp3, mypsf)
     @test all(g -> count(g.valid) <= 1, info3)
 end
+
+@testset "singlet saturation scheme" begin
+    lin = scheme_strengths(SingletSaturation(sat=1e-4), 4)[1]          # weak excitation: linear, only the first order
+    @test isapprox(lin[2], 1.0; atol=1e-3)
+    @test all(lin[3:4] .< 1e-3)
+    st = scheme_strengths(SingletSaturation(sat=8.0), 4)[1]            # strong saturation: higher orders appear
+    @test st[3] > 0.2 && st[2] > st[3] > st[4]
+    @test all(abs.(sin.(scheme_strengths(SingletSaturation(sat=8.0), 4)[2])) .< 1e-9)   # symmetric pattern: phase offsets 0 or π only
+end
