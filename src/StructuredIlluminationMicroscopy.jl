@@ -90,6 +90,7 @@ module StructuredIlluminationMicroscopy
     export rfft_crop, rfft_size, rfftshift, rifftshift, rfftshift!, rifftshift!, get_rft_center
     export swap_vals!, fftshift!, IntType, force_integer_pixels, estimate_prep_mem, print_mem_usage
     export estimate_parameters, estimate_axial, apply_photon_noise, estimate_order_strengths
+    export prim_pattern_statistics, prim_reconstruct
     export preprocess_sim
     export psf_notch, gaussian_notch, remove_oof_light
     export simulate_sim, simulate_sim_3d, get_non_linear_saturation
@@ -113,6 +114,7 @@ module StructuredIlluminationMicroscopy
     include("classical_sim.jl")
     include("parameter_estimation.jl")
     include("order_strengths.jl")
+    include("prim.jl")
     include("axial_estimation.jl")
     include("notch_filters.jl")
     include("find_grating.jl")
