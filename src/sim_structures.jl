@@ -240,11 +240,16 @@ Parameters:
 + `otf_num::Int` : OTF number (only frequencies associated to this OTF number are considered)
                    only those frequencies are considered that contribute to this OTF number
                    as defined by the sp.otf_indices array.
++ `displacement` : `nothing`, or a smooth displacement field `(Dx, Dy)` of the whole pattern (arrays of size `size(h)[1:2]`,
+                   in fringe periods of the lowest pattern frequency; see `pattern_displacement`): every term
+                   `exp(i k_n x)` becomes `exp(i k_n (x + D))`, so all orders and directions stay in sync.
 
 """
-function SIMPattern(h, sp::SIMParams, n, otf_num)
+function SIMPattern(h, sp::SIMParams, n, otf_num; displacement=nothing)
     sim_pattern = zeros(eltype(h), size(h)[1:2])
     pos = idx(eltype(h), size(h)[1:2]) # , offset=CtrFFT)
+    # (the displacement in pixels: fringe periods of the lowest frequency, 2π / (π |k|) pixels each)
+    dscale = 2 / minimum((norm(p[1:2]) for p in sp.k_peak_pos if norm(p[1:2]) > 0); init=Inf)
     for i in eachindex(sp.k_peak_pos)
         k = pi.*sp.k_peak_pos[i][1:2] # sp.k_peak_pos is relative to the Nyquist frequency of the image
         if (otf_num == sp.otf_indices[i] && sp.peak_strengths[n, i] != 0.0)
@@ -252,8 +257,12 @@ function SIMPattern(h, sp::SIMParams, n, otf_num)
             if (strength != 0.0)
                 if (norm(k) == 0.0)
                     sim_pattern .+= strength
+                elseif displacement === nothing
+                    sim_pattern .+= strength .* cos.(dot.(Ref(k), pos) .+ sp.peak_phases[n,i])
                 else
-                    sim_pattern .+= strength .* cos.(dot.(Ref(k), pos) .+ sp.peak_phases[n,i]) 
+                    Dx, Dy = displacement
+                    sim_pattern .+= strength .* cos.(dot.(Ref(k), pos) .+ sp.peak_phases[n,i] .+
+                                                     dscale .* (k[1] .* Dx .+ k[2] .* Dy))
                 end
             end
         end

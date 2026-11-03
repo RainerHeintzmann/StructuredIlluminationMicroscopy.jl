@@ -215,12 +215,15 @@ Parameters:
 + `n_photons::Float64` : number of photons to simulate (default: 0.0, no photons simulated)
 + `n_photons_bg::Float64` : background photons to simulate (default: 0.0, no background photons simulated)
 + `emission_modification::Function` : (non-linear) function to apply to the object before simulating the emission (default: identity function, no modification)
++ `displacement` : `nothing` or a smooth displacement field `(Dx, Dy)` of the illumination pattern (lateral size of `obj`;
+  see `pattern_displacement` and `SIMPattern`). The returned parameters stay undistorted.
 
 returned are the simulated data and the SIMParams object with the downsampled PSF and peak phases.
 # Example:
 see the example folder for a complete example.
 """
-function simulate_sim(obj, sp::SIMParams, downsample_factor::Int = 1; n_photons = 0.0, n_photons_bg=0.0, emission_modification=identity)
+function simulate_sim(obj, sp::SIMParams, downsample_factor::Int = 1; n_photons = 0.0, n_photons_bg=0.0, emission_modification=identity,
+                      displacement=nothing)
     if (isa(obj, Function))
         obj = eltype(spf.mypsf).(obj_generator(sp.mypsf)) # generate an object
     end
@@ -244,7 +247,7 @@ function simulate_sim(obj, sp::SIMParams, downsample_factor::Int = 1; n_photons 
 
     for n in 1:size(sp.peak_phases, 1)
         for otf_num = 1:maximum(sp.otf_indices)
-            sim_pattern = SIMPattern(h, sp, n, otf_num)
+            sim_pattern = SIMPattern(h, sp, n, otf_num; displacement=displacement)
             myidx = ntuple(d->(d==ndims(sim_data)) ? n : Colon(), ndims(sim_data))
             # sim_data[myidx...] .= conv_psf(obj .* sim_pattern, h)
             normal_emission = obj .* sim_pattern
@@ -273,6 +276,42 @@ function simulate_sim(obj, sp::SIMParams, downsample_factor::Int = 1; n_photons 
 
     spd = resample_sim_params(sp, downsample_factor) # also upsamples the psf
     return sim_data, spd
+end
+
+"""
+    pattern_displacement(sz; relative=0.1, scale=1.0, shape=:gaussian)
+
+A smooth random displacement field `(Dx, Dy)` of the illumination pattern (arrays of size `sz[1:2]`), for
+`simulate_sim(_3d)` (`displacement`): the whole pattern moves by `D(x, y)`, so all its orders and directions stay in sync
+(`exp(i k_n x)` → `exp(i k_n (x + D))`). `relative` is the largest local shift in fringe periods of the lowest pattern
+frequency (1 = one full period, i.e. 2π phase along it), `scale` the size of the distortions relative to the image (1: about
+one per image). Uses the global random number generator (`Random.seed!` repeats it).
++ `shape = :gaussian`: about `1/scale²` Gaussian blobs (σ = `scale` × image size / 4) at random positions, each shifting in its
+  own random direction.
++ `shape = :cos`: one cosine of period `scale` × image size along a random direction, with a random phase, shifting in another
+  random direction.
+"""
+function pattern_displacement(sz; relative=0.1, scale=1.0, shape=:gaussian)
+    nx, ny = sz[1], sz[2]
+    L = max(nx, ny)
+    xs = [x for x in 1:nx, y in 1:ny]; ys = [y for x in 1:nx, y in 1:ny]
+    Dx = zeros(nx, ny); Dy = zeros(nx, ny)
+    if shape == :cos
+        θ = 2π * rand(); ψ = 2π * rand(); β = 2π * rand()
+        q = 2π / (scale * L)
+        w = relative .* cos.(q .* (cos(θ) .* xs .+ sin(θ) .* ys) .+ ψ)
+        Dx .= cos(β) .* w; Dy .= sin(β) .* w
+    elseif shape == :gaussian
+        σ = scale * L / 4
+        for _ in 1:max(1, round(Int, 1 / scale^2))
+            x0, y0, β = nx * rand(), ny * rand(), 2π * rand()
+            w = relative .* exp.(-((xs .- x0) .^ 2 .+ (ys .- y0) .^ 2) ./ (2σ^2))
+            Dx .+= cos(β) .* w; Dy .+= sin(β) .* w
+        end
+    else
+        throw(ArgumentError("shape must be :gaussian or :cos"))
+    end
+    return Dx, Dy
 end
 
 """
@@ -307,10 +346,12 @@ Parameters:
 + `n_photons::Int` : number of photons to simulate
 + `n_photons_bg::Float32` : background photons to simulate
 + `downsample_factor::Int` : downsample factor, which upsamples to generate the object (e.g. 2 means half the number of pixels in each dimension)
++ `displacement` : `nothing` or a smooth displacement field `(Dx, Dy)` of the illumination on the object grid (`pattern_displacement`)
 
 returned are the simulated data and the object used for simulation.
 """
-function simulate_sim_3d(obj, spf, mypsf; n_photons = 1000, n_photons_bg=1.2f0, downsample_factor = 2, emission_modification=identity)
+function simulate_sim_3d(obj, spf, mypsf; n_photons = 1000, n_photons_bg=1.2f0, downsample_factor = 2, emission_modification=identity,
+                         displacement=nothing)
     bsz = (size(mypsf,1)*downsample_factor, size(mypsf,2)*downsample_factor, size(mypsf,3))
     if (isa(obj, Function))
         obj = eltype(spf.mypsf).(obj(bsz)) # generate a 3D object
@@ -330,7 +371,8 @@ function simulate_sim_3d(obj, spf, mypsf; n_photons = 1000, n_photons_bg=1.2f0, 
     tmp_k_est = spf.k_peak_pos
     df = (downsample_factor, downsample_factor, 1)
     spf.k_peak_pos = [k_peak_pos./df  for k_peak_pos in (spf.k_peak_pos)]    
-    measured, sp = simulate_sim(obj, spf, downsample_factor; n_photons = n_photons, n_photons_bg = n_photons_bg, emission_modification=emission_modification);
+    measured, sp = simulate_sim(obj, spf, downsample_factor; n_photons = n_photons, n_photons_bg = n_photons_bg, emission_modification=emission_modification,
+                                displacement=displacement);
     spf.k_peak_pos = tmp_k_est
     spf.mypsf = tmppsf # restore the PSF in the SIMParams
 

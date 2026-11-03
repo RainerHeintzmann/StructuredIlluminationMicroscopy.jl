@@ -11,6 +11,6 @@ using NDTools
 include("directions_test.jl")
 include("finalize_test.jl")
 include("nonlinear_test.jl")
-include("rim_test.jl")
+include("distortion_test.jl")
 include("sim2dtests.jl")
 include("upsample_conv2.jl")
