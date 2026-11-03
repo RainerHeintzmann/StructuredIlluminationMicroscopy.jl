@@ -123,7 +123,8 @@ function estimate_order_strengths(dat::AbstractArray{<:Real,3}, sp::SIMParams, m
     qx = fftfreq(nx, nx)                                  # in bins
     qy = fftfreq(ny, ny)'
     notch(a, b) = 1 .- notch_contrast .* exp.(-((a ./ nx) .^ 2 .+ (b ./ ny) .^ 2) ./ (2 * notch_sigma^2))   # (bins → cycles/pixel)
-    r0 = notch_contrast > 0 ? 0.0 : max(2.0, 0.02 * min(nx, ny))
+    use_notch = notch_contrast > 0 && notch_sigma > 0      # (σ = 0: no notch, as `gaussian_notch`)
+    r0 = use_notch ? 0.0 : max(2.0, 0.02 * min(nx, ny))
     qr = hypot.(qx, qy)
     kc = maximum(qr[abs.(H) .> 1e-3 * maximum(abs.(H))])      # the cutoff of the OTF in bins
     win = _edge_taper(nx, taper) .* _edge_taper(ny, taper)'
@@ -163,7 +164,7 @@ function estimate_order_strengths(dat::AbstractArray{<:Real,3}, sp::SIMParams, m
                 w = abs.(H) .* abs.(Hδ)
                 mask = (w .> 1e-3 * maximum(w))
                 # the out-of-focus haze of X_m sits at the detection frequency q ≈ 0, that of the shifted X_{m-1}(q - δ) at q ≈ δ: the notch weights both down
-                wq = notch_contrast > 0 ? notch(qx, qy) .* notch(qx .- δ[1], qy .- δ[2]) : 1.0
+                wq = use_notch ? notch(qx, qy) .* notch(qx .- δ[1], qy .- δ[2]) : 1.0
                 haze_symmetry > 0 && (wq = wq .* exp.(-((qr .- hypot.(qx .- δ[1], qy .- δ[2])) ./ (haze_symmetry * kc)) .^ 2 ./ 2))
                 if r0 > 0
                     mask .&= (hypot.(qx, qy) .> r0) .& (hypot.(qx .- δ[1], qy .- δ[2]) .> r0)

@@ -32,6 +32,8 @@ end
 
 function gaussian_notch(otf, contrast, sigma) 
     RT = real(eltype(otf))
+    # σ = 0 (or no contrast) switches the notch off (else exp(-0/0) = NaN at the centre)
+    (sigma > 0 && contrast != 0) || return real_arr_type(typeof(otf), Val(2))(ones(RT, size(otf)[1:2]))
     real_arr_type(typeof(otf), Val(2))(one(RT) .- RT(contrast) .* exp.(-rr2(RT, size(otf)[1:2], scale=ScaFT)/(2*sigma^2)))
 end
 
