@@ -232,6 +232,8 @@ mutable struct PreparationParams{RAT, CAT} # , CT, D, RT, TA <: AbstractArray{CT
     distortion_phasors::Vector{Any}
     # per order: its OTF support mask (Fourier, order grid), to band-limit an order again after its distortion phasor
     distortion_masks::Vector{Any}
+    # apply them (a prepared distortion can be switched off for a reconstruction without preparing again)
+    use_distortion::Bool
 
     function PreparationParams(RAT::Type)
         CAT = complex_arr_type(RAT, Val(ndims(RAT)))
@@ -249,7 +251,7 @@ mutable struct PreparationParams{RAT, CAT} # , CT, D, RT, TA <: AbstractArray{CT
                       cat_dummy, cat_dummy, # ftorder, order
                       rat_dummy, cat_dummy, cat_dummy,# result, result_rft, result_rft_tmp
                       plan_dummy, plan_dummy, deconv_lambda, background,
-                      cat_dummy, cat_dummy, 16, [], [])
+                      cat_dummy, cat_dummy, 16, [], [], true)
     end
 end
 

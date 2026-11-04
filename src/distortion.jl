@@ -60,7 +60,7 @@ function distortion_phasors(sim_data, sp::SIMParams)
 end
 
 function _apply_distortion_phasor!(order, prep, n)
-    (isempty(prep.distortion_phasors) || n > length(prep.distortion_phasors)) && return order
+    (!prep.use_distortion || isempty(prep.distortion_phasors) || n > length(prep.distortion_phasors)) && return order
     ph = prep.distortion_phasors[n]
     ph === nothing && return order
     order .*= reshape(ph, size(ph)..., ntuple(_ -> 1, ndims(order) - 2)...)     # (the same for every plane)
@@ -101,7 +101,7 @@ end
 
 # after the FFT of a compensated order: back to the reliable part of its OTF support (`distortion_masks`)
 function _mask_distorted_order!(order, prep, n)
-    (n > length(prep.distortion_masks) || prep.distortion_masks[n] === nothing) && return order
+    (!prep.use_distortion || n > length(prep.distortion_masks) || prep.distortion_masks[n] === nothing) && return order
     m = prep.distortion_masks[n]
     order .*= reshape(m, size(m)..., ntuple(_ -> 1, ndims(order) - ndims(m))...)
     return order
