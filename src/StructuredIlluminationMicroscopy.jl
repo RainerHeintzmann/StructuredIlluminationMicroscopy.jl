@@ -80,6 +80,7 @@ module StructuredIlluminationMicroscopy
     using FourierTools # used only for grating search algorithms
     using Dates # for saving grating parameters with timestamp
     using DelimitedFiles # to load grating para files
+    import Optim # the joint k-vector / pattern-distortion fit (distortion.jl)
 
     export PSFParams, SIMParams, ReconParams, PreparationParams
     export generate_peaks_directions, generate_peaks_directions_param, direction_ranges
@@ -93,6 +94,7 @@ module StructuredIlluminationMicroscopy
     export preprocess_sim
     export psf_notch, gaussian_notch, remove_oof_light
     export simulate_sim, simulate_sim_3d, pattern_displacement, get_non_linear_saturation
+    export PatternDistortion, estimate_distortion, distortion_phase, distortion_terms, peak_groups
     export NonlinearScheme, ActivationDepletionReadout, SingletSaturation, PeriodicProfile, scheme_profile, scheme_coefficients, scheme_strengths, scheme_truncation
     export get_otf_weights, kz_otf_extend, test_unmix_real
     export notch_filter
@@ -113,6 +115,7 @@ module StructuredIlluminationMicroscopy
     include("classical_sim.jl")
     include("parameter_estimation.jl")
     include("order_strengths.jl")
+    include("distortion.jl")
     include("axial_estimation.jl")
     include("notch_filters.jl")
     include("find_grating.jl")

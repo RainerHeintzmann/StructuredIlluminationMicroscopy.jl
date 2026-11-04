@@ -56,6 +56,8 @@ function separate_and_place_orders(sim_data, sp::SIMParams, prep)
         # peak phases are already accounted for in the weights
         # unmix (separate) an order from the data, writes into order:
         dot_mul_last_dim!(order, sim_data, prep.pinv_weight_mat, n);
+        # a distorted pattern: remove the order's local phase e^{iψ_n(x)} (`SIMParams.distortion`)
+        _apply_distortion_phasor!(order, prep, n)
         # apply a real-space subpixel shift to the order prior to its fft:
         if !isnothing(prep.subpixel_shifters[1])
             ordershift = shift_subpixel!(order, ordershift, prep, n) 
@@ -67,6 +69,8 @@ function separate_and_place_orders(sim_data, sp::SIMParams, prep)
         ifftshift!(ftorder, order)
         prep.plan_fft! * ftorder # fft!
         fftshift!(order, ftorder) 
+        # a distortion phasor spreads the order beyond its OTF support (the Wiener filter would amplify that): band-limit it again
+        _mask_distorted_order!(order, prep, n)
         # if an otf-modification is provided it is multiplied here:
         if (prod(size(prep.otfs))>1)
             order .*= prep.otfs[n]
@@ -105,6 +109,7 @@ function just_separate(sim_data, sp::SIMParams, prep)
     orders = similar(sim_data, CT, imsz..., num_orders)
     for (n, order) in zip(1:num_orders, eachslice(orders, dims=ndims(sim_data)))
         dot_mul_last_dim!(order, sim_data, prep.pinv_weight_mat, n);
+        _apply_distortion_phasor!(order, prep, n)
     end
     return orders
 end
@@ -479,6 +484,9 @@ function recon_sim_prepare(sim_data, sp::SIMParams, rp::ReconParams; use_final_f
 
         # calculate the pseudo-inverse of the weight-matrix constructed from the information in the SIMParams object
         prep.pinv_weight_mat = pinv_weight_matrix(sp)
+        # a distorted pattern: the per-order phasors e^{-iψ_n} (once; non-separable, one cis per pixel and order)
+        prep.distortion_phasors = distortion_phasors(sim_data, sp)
+        prep.distortion_masks = distortion_masks(sim_data, sp, prep.otfs)
 
         prep.result_rft = get_upsampled_rft(sim_data, prep)
         prep.plan_irfft = (rp.use_measure) ? plan_irfft(prep.result_rft, get_result_size(imsz, rp.upsample_factor)[1], flags=FFTW.MEASURE) : plan_irfft(prep.result_rft, get_result_size(imsz, rp.upsample_factor)[1])

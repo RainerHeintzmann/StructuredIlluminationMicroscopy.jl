@@ -216,7 +216,7 @@ Parameters:
 + `n_photons_bg::Float64` : background photons to simulate (default: 0.0, no background photons simulated)
 + `emission_modification::Function` : (non-linear) function to apply to the object before simulating the emission (default: identity function, no modification)
 + `displacement` : `nothing` or a smooth displacement field `(Dx, Dy)` of the illumination pattern (lateral size of `obj`;
-  see `pattern_displacement` and `SIMPattern`). The returned parameters stay undistorted.
+  see `pattern_displacement` and `SIMPattern`), or a vector of them, one per direction. The returned parameters stay undistorted.
 
 returned are the simulated data and the SIMParams object with the downsampled PSF and peak phases.
 # Example:
@@ -279,7 +279,7 @@ function simulate_sim(obj, sp::SIMParams, downsample_factor::Int = 1; n_photons 
 end
 
 """
-    pattern_displacement(sz; relative=0.1, scale=1.0, shape=:gaussian)
+    pattern_displacement(sz; relative=0.1, scale=1.0, shape=:gaussian, per_direction=0)
 
 A smooth random displacement field `(Dx, Dy)` of the illumination pattern (arrays of size `sz[1:2]`), for
 `simulate_sim(_3d)` (`displacement`): the whole pattern moves by `D(x, y)`, so all its orders and directions stay in sync
@@ -290,8 +290,11 @@ one per image). Uses the global random number generator (`Random.seed!` repeats 
   own random direction.
 + `shape = :cos`: one cosine of period `scale` × image size along a random direction, with a random phase, shifting in another
   random direction.
+`per_direction = n > 0` returns a vector of `n` independent fields, one per pattern direction (group of parallel peaks, see
+`peak_groups`): the directions are then displaced out of sync (e.g. aberrations differing between the beams).
 """
-function pattern_displacement(sz; relative=0.1, scale=1.0, shape=:gaussian)
+function pattern_displacement(sz; relative=0.1, scale=1.0, shape=:gaussian, per_direction=0)
+    per_direction > 0 && return [pattern_displacement(sz; relative=relative, scale=scale, shape=shape) for _ in 1:per_direction]
     nx, ny = sz[1], sz[2]
     L = max(nx, ny)
     xs = [x for x in 1:nx, y in 1:ny]; ys = [y for x in 1:nx, y in 1:ny]

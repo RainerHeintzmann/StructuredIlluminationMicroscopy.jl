@@ -1,4 +1,20 @@
 """
+    PatternDistortion
+
+A smooth distortion of the illumination pattern (see `estimate_distortion`): every peak `i` of a `SIMParams` gets the extra
+phase `ψ_i(x, y)` (radians), i.e. its term becomes `cos(k_i·x + φ + ψ_i)`, with
+`ψ_i = Σ_t coefs[i, t] P_a(u) P_b(v)` (Legendre polynomials `P` in the normalized centred coordinates `u = x / (nx/2)`,
+`v = y / (ny/2)` ∈ [-1, 1), terms `(a, b) = distortion_terms(degree)[t]`). Independent of the sampling, so
+`resample_sim_params` keeps it. `model`: how it was estimated (`:displacement`: one displacement field of the whole pattern,
+`:direction`: one phase field per direction).
+"""
+struct PatternDistortion
+    degree::Int
+    coefs::Matrix{Float64}
+    model::Symbol
+end
+
+"""
     SIMParams
 
 a (mutable) structure that holds the parameters for the simulation. See details below.
@@ -13,6 +29,7 @@ Fields:
 + `otf_indices::Array{Int, 1}` : otf-indices. An array of indices that indicate the OTF to be used for each peak. Note that for three-dimensional OTFs some peaks have associated OTFs where the z-modulation is part of the OTF. Due to refractive index mismatch or misalanement of the optical axis, these OTFs are characterized by a relative phase.
 + `otf_phases::Array{Float64, 1}` : the relative phases of the OTFs, which are approximated as a multiplication of the PSF with a cos(k_z z + phase)
 + `otf_exponent::Float64` : the exponent applied to the magnitude of the OTF, typically 1.0 for unmodified OTFS. 
++ `distortion` : `nothing` or a `PatternDistortion` (smooth local phases of the pattern; keyword `distortion` of the constructors).
 
 """
 mutable struct SIMParams
@@ -41,15 +58,18 @@ mutable struct SIMParams
     # if not equalt to 1.0, the PSF is modified by applying a power to the corresponding OTF.
     otf_exponent::Float64
 
-    function SIMParams(mypsf, k_peak_pos::Array{NTuple{3, Float64}, 1}, peak_phases::Array{Float64,2}, peak_strengths::Array{Float64,2}, otf_indices::Array{Int,1}=[1], otf_phases::Array{Float64,1}=[0.0], otf_exponent=1.0)  
+    # `nothing` or a `PatternDistortion`: smooth local phases ψ_i(x, y) of the pattern peaks
+    distortion::Union{Nothing, PatternDistortion}
+
+    function SIMParams(mypsf, k_peak_pos::Array{NTuple{3, Float64}, 1}, peak_phases::Array{Float64,2}, peak_strengths::Array{Float64,2}, otf_indices::Array{Int,1}=[1], otf_phases::Array{Float64,1}=[0.0], otf_exponent=1.0; distortion=nothing)  
         if (otf_exponent != 1.0)
                 myotf = rfft(mypsf)
                 mypsf = irfft(myotf .* abs.(myotf).^otf_exponent ./ (abs.(myotf) .+ 1f-10), size(mypsf,1))
         end
-        new(mypsf, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases, otf_exponent)
+        new(mypsf, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases, otf_exponent, distortion)
     end
-    function SIMParams(sp::SIMParams; mypsf=sp.mypsf, k_peak_pos=copy(sp.k_peak_pos), peak_phases=copy(sp.peak_phases), peak_strengths=copy(sp.peak_strengths), otf_indices=copy(sp.otf_indices), otf_phases=copy(sp.otf_phases), otf_exponent=copy(sp.otf_exponent))
-        new(mypsf, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases, otf_exponent)
+    function SIMParams(sp::SIMParams; mypsf=sp.mypsf, k_peak_pos=copy(sp.k_peak_pos), peak_phases=copy(sp.peak_phases), peak_strengths=copy(sp.peak_strengths), otf_indices=copy(sp.otf_indices), otf_phases=copy(sp.otf_phases), otf_exponent=copy(sp.otf_exponent), distortion=sp.distortion)
+        new(mypsf, k_peak_pos, peak_phases, peak_strengths, otf_indices, otf_phases, otf_exponent, distortion)
     end
 end
 
@@ -208,6 +228,10 @@ mutable struct PreparationParams{RAT, CAT} # , CT, D, RT, TA <: AbstractArray{CT
     filter_otf::CAT # normalized OTF of the reconstruction (used by update_final_filter! and deconvolve_result); size 1 if unused
     filter_hgoal::CAT # goal transfer function used for the final filter; size 1 if unused
     deconv_iterations::Int
+    # per order: e^{-iψ_n} on the data grid (x, y) for a distorted pattern (`SIMParams.distortion`), else empty
+    distortion_phasors::Vector{Any}
+    # per order: its OTF support mask (Fourier, order grid), to band-limit an order again after its distortion phasor
+    distortion_masks::Vector{Any}
 
     function PreparationParams(RAT::Type)
         CAT = complex_arr_type(RAT, Val(ndims(RAT)))
@@ -225,7 +249,7 @@ mutable struct PreparationParams{RAT, CAT} # , CT, D, RT, TA <: AbstractArray{CT
                       cat_dummy, cat_dummy, # ftorder, order
                       rat_dummy, cat_dummy, cat_dummy,# result, result_rft, result_rft_tmp
                       plan_dummy, plan_dummy, deconv_lambda, background,
-                      cat_dummy, cat_dummy, 16)
+                      cat_dummy, cat_dummy, 16, [], [])
     end
 end
 
@@ -242,7 +266,9 @@ Parameters:
                    as defined by the sp.otf_indices array.
 + `displacement` : `nothing`, or a smooth displacement field `(Dx, Dy)` of the whole pattern (arrays of size `size(h)[1:2]`,
                    in fringe periods of the lowest pattern frequency; see `pattern_displacement`): every term
-                   `exp(i k_n x)` becomes `exp(i k_n (x + D))`, so all orders and directions stay in sync.
+                   `exp(i k_n x)` becomes `exp(i k_n (x + D))`, so all orders and directions stay in sync. A vector of such
+                   fields displaces each direction (group of parallel peaks, see `peak_groups`) by its own field (out of sync).
+Without `displacement`, a `sp.distortion` (`PatternDistortion`) is applied.
 
 """
 function SIMPattern(h, sp::SIMParams, n, otf_num; displacement=nothing)
@@ -258,9 +284,14 @@ function SIMPattern(h, sp::SIMParams, n, otf_num; displacement=nothing)
                 if (norm(k) == 0.0)
                     sim_pattern .+= strength
                 elseif displacement === nothing
-                    sim_pattern .+= strength .* cos.(dot.(Ref(k), pos) .+ sp.peak_phases[n,i])
+                    ψ = distortion_phase(sp, i, size(h)[1:2])
+                    if ψ === nothing
+                        sim_pattern .+= strength .* cos.(dot.(Ref(k), pos) .+ sp.peak_phases[n,i])
+                    else
+                        sim_pattern .+= strength .* cos.(dot.(Ref(k), pos) .+ sp.peak_phases[n,i] .+ ψ)
+                    end
                 else
-                    Dx, Dy = displacement
+                    Dx, Dy = displacement isa Tuple ? displacement : displacement[_peak_group_of(sp, i)]
                     sim_pattern .+= strength .* cos.(dot.(Ref(k), pos) .+ sp.peak_phases[n,i] .+
                                                      dscale .* (k[1] .* Dx .+ k[2] .* Dy))
                 end
