@@ -145,12 +145,23 @@ those are the phases and the k-vectors, never the distortion.
   sync); `:direction`: one phase field per direction (group of parallel peaks), harmonics scaled by their |k|.
 + `reg`: penalty `reg Σ_j deg_j² θ_j²` on the coefficients (radians at the base frequency), relative to the summed peak
   strength at the start.
++ `start_psi`: optionally one more start: per group (`peak_groups`) the local phase of its base peak on the data grid
+  (e.g. a previous estimate, `distortion_phase`); fitted like the surrogate's unwrapped phase.
++ `init`: the start of the fit. `:zero` (no distortion) gets trapped in local optima for large distortions (≳ 1 rad RMS);
+  `:unwrap` starts from the surrogate solution: per direction the demodulated peak region (the `crop`² grid) of all images,
+  phase-aligned and summed, is a field ≈ |·| e^{iΦ(x)}; its phase is unwrapped (quality-guided, strongest pixels first) and
+  the polynomial fitted by weighted least squares, then its amplitude scanned (0.5…3×, with the k-vectors re-fitted). The
+  images are aligned by their phase relative to the strongest image (the distortion cancels in it). `:auto` (default) runs
+  both starts and keeps the higher peak strength
+  (`:direction` model: per direction, then refined jointly).
 Returns the new `SIMParams` (refined k-vectors and phases, `distortion` set; strengths unchanged) and
-`(; gain, rms)`: the relative increase of the summed peak strength and the RMS of ψ (radians) per group.
+`(; gain, rms, start)`: the relative increase of the summed peak strength, the RMS of ψ (radians) per group and the
+start that won (`:zero` / `:unwrap` / `:given`, or `:combined`: per direction the better one, `:direction` model).
 """
 function estimate_distortion(dat, sp::SIMParams, mypsf=sp.mypsf; degree=3, model=:displacement, reg=1e-4, crop=64,
                              suppress_sigma=0.15, subtract_mean=true, otf_exponent=1.0, otf_moebius=1.0, iterations=300,
-                             verbose=false)
+                             init::Symbol=:auto, start_psi=nothing, verbose=false)
+    init in (:auto, :zero, :unwrap) || throw(ArgumentError("init must be :auto, :zero or :unwrap"))
     model in (:displacement, :direction) || throw(ArgumentError("model must be :displacement or :direction"))
     degree >= 2 || throw(ArgumentError("a distortion needs degree ≥ 2 (degree 0 and 1 are the phases and the k-vectors)"))
     d3 = ndims(dat) == 4 ? dat[:, :, 1, :] : dat
@@ -258,26 +269,88 @@ function estimate_distortion(dat, sp::SIMParams, mypsf=sp.mypsf; degree=3, model
         F === nothing || return -val / Fn + pen
         return nothing
     end
-    p = zeros(np)
-    start = -fg!(0.0, nothing, p)
+    start = -fg!(0.0, nothing, zeros(np))
     regs = reg * start
-    # coarse to fine: first the k-vectors alone, then the distortion up to degree 2, 3, …
-    for dmax in 1:degree
-        act = vcat(trues(2G), dmax >= 2 ? repeat(degj .<= dmax, nθ ÷ nb) : falses(nθ))
-        x0 = p[act]
-        full = copy(p)
-        function fga!(F, Gr, x)
-            full[act] .= x
-            Gf = Gr === nothing ? nothing : zeros(np)
-            r = fg!(F, Gf, full)
-            Gr === nothing || (Gr .= Gf[act])
-            return r
+    # coarse to fine from `p` (first the k-vectors alone, then the distortion up to degree 2, 3, …); returns p and the loss
+    function refine(p; dmaxes=1:degree)
+        p = copy(p)
+        for dmax in dmaxes
+            act = vcat(trues(2G), dmax >= 2 ? repeat(degj .<= dmax, nθ ÷ nb) : falses(nθ))
+            x0 = p[act]
+            full = copy(p)
+            function fga!(F, Gr, x)
+                full[act] .= x
+                Gf = Gr === nothing ? nothing : zeros(np)
+                r = fg!(F, Gf, full)
+                Gr === nothing || (Gr .= Gf[act])
+                return r
+            end
+            res = Optim.optimize(x -> fga!(0.0, nothing, x), (Gr, x) -> fga!(nothing, Gr, x), x0, Optim.LBFGS(),
+                                 Optim.Options(iterations=iterations, g_tol=1e-10))
+            p[act] .= Optim.minimizer(res)
         end
-        res = Optim.optimize(x -> fga!(0.0, nothing, x), (Gr, x) -> fga!(nothing, Gr, x), x0, Optim.LBFGS(),
-                             Optim.Options(iterations=iterations, g_tol=1e-10))
-        p[act] .= Optim.minimizer(res)
-        verbose && println("distortion fit up to degree $dmax: peak strength $(round(-Optim.minimum(res); sigdigits=5)) (start $(round(start; sigdigits=5)))")
+        return p, fg!(0.0, nothing, p)
     end
+    # Start values: zero (the undistorted estimate), and the surrogate solution — the local phase map of the demodulated
+    # peak region (the c×c grid), unwrapped and fitted by least squares (`_unwrap_start`; no local optima for a smooth
+    # field). Large distortions (≳ 1 rad RMS) trap the fit from zero in a local optimum; `init` = :zero, :unwrap or :auto
+    # (both, the better one is kept).
+    starts = Any[(init == :auto ? [:zero, :unwrap] : [init])...]
+    start_psi === nothing || push!(starts, :given)
+    # per group: its summed peak strength and penalty (the directions are independent in the :direction model)
+    function group_loss(p, g)
+        Φg = zeros(c * c)
+        phase!(Φg, p, g)
+        e = cis.(.-Φg)
+        v = sum(abs2(sum(vec(q) .* e)) for q in Qc[g]) / Fn
+        θ = model == :direction ? θblock(p, g) : view(p, 2G+1:np)
+        return -v + regs * sum(repeat(degj, length(θ) ÷ nb) .^ 2 .* θ .^ 2)
+    end
+    # The surrogate start has the right shape but not reliably the right amplitude (unwrapping errors in gaps of a sparse
+    # object can exaggerate or dilute it): scan a factor on its distortion (with the k-vectors re-fitted for each), per
+    # direction (:direction model) or for all, and keep the best before the full refinement.
+    function scale_scan(p0)
+        facs = (0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0)
+        cands = Any[]
+        for f in facs
+            pf = copy(p0); pf[2G+1:np] .*= f
+            push!(cands, first(refine(pf; dmaxes=1:1)))
+        end
+        if model == :direction
+            pb = copy(cands[1])
+            for g in 1:G
+                c_ = cands[argmin([group_loss(cd, g) for cd in cands])]
+                pb[2g-1:2g] .= c_[2g-1:2g]
+                pb[2G + (g-1)*nb + 1:2G + g*nb] .= c_[2G + (g-1)*nb + 1:2G + g*nb]
+            end
+            return pb
+        end
+        return cands[argmin([fg!(0.0, nothing, cd) for cd in cands])]
+    end
+    fits = Any[]
+    for st in starts
+        p0 = st == :zero ? zeros(np) :
+             st == :given ? _unwrap_start(Qc, U, V, B, kdir, model, G, nb;
+                                          Φs=[vec(Float64.(ψ[1:size(ψ, 1) ÷ c:end, 1:size(ψ, 2) ÷ c:end][1:c, 1:c])) for ψ in start_psi]) :
+             _unwrap_start(Qc, U, V, B, kdir, model, G, nb)
+        st == :unwrap && (p0 = scale_scan(p0))
+        pf, L = refine(p0)
+        verbose && println("distortion fit from $st start: peak strength $(round(-L; sigdigits=5)) (undistorted $(round(start; sigdigits=5)))")
+        push!(fits, (p=pf, L=L, st=st))
+    end
+    best = fits[argmin([f.L for f in fits])]
+    if model == :direction && length(fits) > 1
+        # the better start for every direction, combined and refined once more
+        pc = zeros(np)
+        for g in 1:G
+            f = fits[argmin([group_loss(f.p, g) for f in fits])]
+            pc[2g-1:2g] .= f.p[2g-1:2g]
+            pc[2G + (g-1)*nb + 1:2G + g*nb] .= f.p[2G + (g-1)*nb + 1:2G + g*nb]
+        end
+        pr, Lr = refine(pc)
+        Lr < best.L && (best = (p=pr, L=Lr, st=:combined))
+    end
+    p = best.p
     final = -fg!(0.0, nothing, p) + regs * sum(repeat(degj, nθ ÷ nb) .^ 2 .* p[2G+1:np] .^ 2)
 
     # ψ of every peak (Q convention = the phase convention of the correlation: the pattern's ψ, see the tests)
@@ -322,7 +395,88 @@ function estimate_distortion(dat, sp::SIMParams, mypsf=sp.mypsf; degree=3, model
         end
     end
     sp2.peak_phases = phases
-    return sp2, (; gain=final / max(start, eps()) - 1, rms)
+    return sp2, (; gain=final / max(start, eps()) - 1, rms, start=best.st)
+end
+
+# Quality-guided phase unwrapping of a complex field: from its strongest pixel, always the strongest pixel next to the
+# unwrapped region is unwrapped relative to its strongest unwrapped neighbour.
+function _unwrap_quality(Z)
+    n1, n2 = size(Z)
+    q = abs.(Z)
+    out = zeros(n1, n2)
+    done = falses(n1, n2)
+    front = fill(-Inf, n1, n2)               # the quality of the frontier pixels (-Inf: not on the frontier)
+    i0 = argmax(q)
+    out[i0] = angle(Z[i0]); done[i0] = true
+    nbrs(i, j) = ((i + a, j + b) for (a, b) in ((1, 0), (-1, 0), (0, 1), (0, -1)) if 1 <= i + a <= n1 && 1 <= j + b <= n2)
+    for (a, b) in nbrs(Tuple(i0)...); done[a, b] || (front[a, b] = q[a, b]); end
+    for _ in 2:n1*n2
+        v, ci = findmax(front)
+        v == -Inf && break
+        i, j = Tuple(ci)
+        # the strongest unwrapped neighbour
+        bi, bj, bq = 0, 0, -Inf
+        for (a, b) in nbrs(i, j)
+            done[a, b] && q[a, b] > bq && ((bi, bj, bq) = (a, b, q[a, b]))
+        end
+        out[i, j] = out[bi, bj] + angle(Z[i, j] * conj(Z[bi, bj]))
+        done[i, j] = true; front[i, j] = -Inf
+        for (a, b) in nbrs(i, j); done[a, b] || (front[a, b] = q[a, b]); end
+    end
+    return out
+end
+
+# The surrogate start of `estimate_distortion`: per group the demodulated peak fields of its images, phase-aligned by
+# their global correlation and summed (and slightly smoothed), have the phase Φ(x) = const + α u + β v + ψ(x); unwrapped and
+# fitted by weighted least squares (weights |Z|²) in the fit's parameterization (per group α, β; θ of the model).
+# Per group the demodulated peak fields of its images, phase-aligned to the strongest image and summed, slightly smoothed:
+# ≈ |·| e^{iΦ(x)}, Φ = const + α u + β v + ψ. (The relative phase Σ Q_m conj(Q_ref) does not depend on the distortion — it
+# cancels — unlike the global correlation Σ Q_m, which large distortions make ill-defined.)
+function _surrogate_fields(Qc, c)
+    f = [min(i - 1, c - i + 1) for i in 1:c]
+    smooth = exp.(-(f .^ 2 .+ (f') .^ 2) ./ (2 * (c / 8)^2))       # (a Gaussian low-pass, σ ≈ 1.3 grid pixels)
+    return map(Qc) do Qg
+        ref = Qg[argmax([sum(abs2, q) for q in Qg])]
+        Z = zeros(ComplexF64, c, c)
+        for q in Qg
+            r = sum(q .* conj.(ref))
+            Z .+= q .* (abs(r) > 0 ? conj(r) / abs(r) : 1.0)
+        end
+        ifft(fft(Z) .* smooth)
+    end
+end
+
+function _unwrap_start(Qc, U, V, B, kdir, model, G, nb; Φs=nothing)
+    c = size(U, 1)
+    given = Φs !== nothing
+    given || (Φs = Vector{Vector{Float64}}(undef, G))
+    Ws = Vector{Vector{Float64}}(undef, G)
+    Zs = _surrogate_fields(Qc, c)
+    for g in 1:G
+        Z = Zs[g]
+        given || (Φs[g] = vec(_unwrap_quality(Z)))
+        Ws[g] = vec(abs2.(Z))
+    end
+    nθ = model == :direction ? G * nb : 2nb
+    np = 2G + nθ
+    # columns: per group a constant (not a parameter), then the parameters
+    A = zeros(G * c * c, G + np)
+    y = zeros(G * c * c); w = zeros(G * c * c)
+    for g in 1:G
+        r = (g - 1) * c * c + 1:g * c * c
+        A[r, g] .= 1
+        A[r, G + 2g - 1] .= vec(U); A[r, G + 2g] .= vec(V)
+        if model == :direction
+            A[r, G + 2G + (g - 1) * nb + 1:G + 2G + g * nb] .= B
+        else
+            A[r, G + 2G + 1:G + 2G + nb] .= kdir[g][1] .* B
+            A[r, G + 2G + nb + 1:G + 2G + 2nb] .= kdir[g][2] .* B
+        end
+        y[r] .= Φs[g]; w[r] .= Ws[g] ./ max(sum(Ws[g]), eps())
+    end
+    sw = sqrt.(w)
+    x = (sw .* A) \ (sw .* y)
+    return x[G+1:end]
 end
 
 # the sign relating the fitted linear phase to the k-vector shift (`exp_ikx_sep` convention, checked in the tests)

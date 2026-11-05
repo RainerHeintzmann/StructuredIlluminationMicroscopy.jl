@@ -86,6 +86,16 @@ end
         @test cor(detrend(distortion_phase(spd, g[1], (nx, nx))), detrend(true_psi(D, g[1]))) > 0.8
     end
     rp = ReconParams(; double_use=false, upsample_factor=df)
+    # the starts: :auto (zero and the unwrapped surrogate, per direction the better one) never ends below the zero start;
+    # the surrogate alone finds it too; a given start (`start_psi`, here the estimate itself) is used
+    _, iz = estimate_distortion(d, spe, mypsf; degree=4, model=:direction, init=:zero)
+    @test info.gain >= iz.gain - 1e-6 && info.start in (:zero, :unwrap, :combined)
+    spu, iu = estimate_distortion(d, spe, mypsf; degree=4, model=:direction, init=:unwrap)
+    @test iu.start == :unwrap && all(cor(detrend(distortion_phase(spu, g[1], (nx, nx))), detrend(true_psi(D, g[1]))) > 0.8 for g in groups)
+    spg, ig = estimate_distortion(d, spe, mypsf; degree=4, model=:direction, init=:zero,
+                                  start_psi=[distortion_phase(spd, g[1], (nx, nx)) for g in groups])
+    @test ig.gain >= info.gain - 0.01
+    @test_throws ArgumentError estimate_distortion(d, spe, mypsf; init=:other)
     # the super-resolved band of the reconstruction (same order masks for both): better with the distortion
     fr = [hypot(fftfreq(N, N)[i], fftfreq(N, N)[j]) for i in 1:N, j in 1:N]
     hp(a) = real.(ifft(fft(Float64.(a)) .* ((fr .> kc * nx / 2) .& (fr .< (kc + k1) * nx / 2))))
