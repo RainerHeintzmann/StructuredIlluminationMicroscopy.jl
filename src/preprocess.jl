@@ -90,7 +90,7 @@ function lowpass_xy(a::AbstractArray{T}, sigma) where {T<:Real}
 end
 
 """
-    preprocess_sim(dat; bg = 100f0, num_directions=nothing, reg_const=2f0, correct_drift=true, enforce_mean=true,
+    preprocess_sim(dat; bg = 100f0, num_directions=nothing, reg_const=nothing, correct_drift=true, enforce_mean=true,
                    verbose=false, damp_edge=true, zero_clip=false, mean_lowpass=0)
 
 Preprocesses the data for SIM analysis by subtracting a background value and normalizing the data:
@@ -100,8 +100,12 @@ phases of every direction equal to the overall mean (with `mean_lowpass > 0` bot
 low-pass filtered laterally with a Gaussian of that sigma in pixels, so each direction is corrected by
 its smooth illumination profile instead of a noisy per-pixel ratio), and `zero_clip` finally clips negative values
 (e.g. from the background subtraction, the drift interpolation or the mean enforcement) to zero.
+The mean enforcement scales each direction by `m ⋅ m_d / (m_d² + reg_const²)` (m: the mean of all images, m_d: of the
+direction); `reg_const` only keeps dark pixels from being amplified. Default `nothing`: 1 % of the mean intensity, so the
+result does not depend on the intensity scale (a fixed value, e.g. 2 photons, weights scaled or noise-free data with values
+far below it by about m_d², a strong nonlinear distortion).
 """
-function preprocess_sim(dat; bg = 100f0, num_directions=nothing, reg_const=2f0, correct_drift=true, enforce_mean=true, verbose=false, damp_edge=true,
+function preprocess_sim(dat; bg = 100f0, num_directions=nothing, reg_const=nothing, correct_drift=true, enforce_mean=true, verbose=false, damp_edge=true,
                         zero_clip=false, mean_lowpass=0, correct_indiv_brightness=true)
     dat = dat .- bg # copies
     # correct slice brightness fluctuations
@@ -126,10 +130,11 @@ function preprocess_sim(dat; bg = 100f0, num_directions=nothing, reg_const=2f0, 
         end
         if (enforce_mean) # enforces all directions to have the same widefield mean projection
             all_mean = lowpass_xy(mean(dat, dims=ndims(dat)), mean_lowpass)
+            reg = isnothing(reg_const) ? 0.01f0 * abs(mean(all_mean)) : reg_const
             for rng in direction_ranges(size(dat, ndims(dat)), num_directions)
                 sub_data = slice(dat, ndims(dat), rng)
                 sub_mean = lowpass_xy(mean(sub_data, dims=ndims(sub_data)), mean_lowpass)
-                sub_data .*= all_mean .* sub_mean ./ (abs2.(sub_mean) .+ abs2(reg_const))
+                sub_data .*= all_mean .* sub_mean ./ (abs2.(sub_mean) .+ abs2(reg))
             end
         end
     end
