@@ -83,10 +83,10 @@ deviation of `sigma` pixels (periodic boundaries, via the FFT); `a` for `sigma <
 function lowpass_xy(a::AbstractArray{T}, sigma) where {T<:Real}
     sigma > 0 || return a
     sx, sy = size(a, 1), size(a, 2)
-    fx = reshape(FFTW.rfftfreq(sx), :, 1)
-    fy = reshape(FFTW.fftfreq(sy), 1, :)
+    fx = reshape(rfftfreq(sx), :, 1)
+    fy = reshape(fftfreq(sy), 1, :)
     g = T.(exp.(-2 * pi^2 * sigma^2 .* (fx .^ 2 .+ fy .^ 2)))
-    return T.(FFTW.irfft(FFTW.rfft(a, (1, 2)) .* g, sx, (1, 2)))
+    return T.(irfft(rfft(a, (1, 2)) .* g, sx, (1, 2)))
 end
 
 """

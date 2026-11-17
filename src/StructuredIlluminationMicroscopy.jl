@@ -66,7 +66,8 @@ Pkg.add("StructuredIlluminationMicroscopy")
 """
 module StructuredIlluminationMicroscopy
 
-    using FFTW
+    # FFT interface only; the FFT library (FFTL in the apps, cuFFT for CuArrays) is loaded by the application.
+    using AbstractFFTs
     using IndexFunArrays # for rr and delta
     using LinearAlgebra # for dot
     using NDTools  # select_region!

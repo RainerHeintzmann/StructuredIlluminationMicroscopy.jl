@@ -489,9 +489,11 @@ function recon_sim_prepare(sim_data, sp::SIMParams, rp::ReconParams; use_final_f
         prep.distortion_masks = distortion_masks(sim_data, sp, prep.otfs)
 
         prep.result_rft = get_upsampled_rft(sim_data, prep)
-        prep.plan_irfft = (rp.use_measure) ? plan_irfft(prep.result_rft, get_result_size(imsz, rp.upsample_factor)[1], flags=FFTW.MEASURE) : plan_irfft(prep.result_rft, get_result_size(imsz, rp.upsample_factor)[1])
+        # (`use_measure` selected FFTW's MEASURE planner flag; planner flags are specific to the FFT library,
+        # so the plans are made without flags now -- FFTL plans fast without measuring)
+        prep.plan_irfft = plan_irfft(prep.result_rft, get_result_size(imsz, rp.upsample_factor)[1])
         prep.order =  similar(sim_data, CT, imsz...)
-        prep.plan_fft! = (rp.use_measure) ? plan_fft!(prep.order, flags=FFTW.MEASURE) : plan_fft!(prep.order)
+        prep.plan_fft! = plan_fft!(prep.order)
 
         if rp.strength_weighting
             # matched filter: the order images have equal noise, order n carries the coefficient c_n/c_0 = s_n/(2 s_0). The weights below
